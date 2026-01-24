@@ -3,21 +3,21 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
 
-pub struct FeatureRetryTracker {
+pub struct IterationErrorTracker {
     counts: HashMap<String, u32>,
-    max_retries: u32,
+    max_errors: u32,
 }
 
-impl FeatureRetryTracker {
+impl IterationErrorTracker {
     #[must_use]
-    pub fn new(max_retries: u32) -> Self {
+    pub fn new(max_errors: u32) -> Self {
         Self {
             counts: HashMap::new(),
-            max_retries,
+            max_errors,
         }
     }
 
-    pub fn record_failure(&mut self, feature_id: &str) -> u32 {
+    pub fn record_error(&mut self, feature_id: &str) -> u32 {
         let count = self.counts.entry(feature_id.to_string()).or_insert(0);
         *count += 1;
         *count
@@ -29,12 +29,12 @@ impl FeatureRetryTracker {
 
     #[must_use]
     pub fn should_block(&self, feature_id: &str) -> bool {
-        if self.max_retries == 0 {
+        if self.max_errors == 0 {
             return false;
         }
         self.counts
             .get(feature_id)
-            .is_some_and(|&c| c >= self.max_retries)
+            .is_some_and(|&c| c >= self.max_errors)
     }
 
     #[must_use]
@@ -44,7 +44,7 @@ impl FeatureRetryTracker {
 
     #[must_use]
     pub fn is_enabled(&self) -> bool {
-        self.max_retries > 0
+        self.max_errors > 0
     }
 }
 
@@ -114,30 +114,30 @@ fn update_status_in_content(content: &str, feature_id: &str) -> String {
 mod tests {
     use super::*;
 
-    mod feature_retry_tracker_tests {
+    mod iteration_error_tracker_tests {
         use super::*;
 
         #[test]
         fn new_creates_empty_tracker() {
-            let tracker = FeatureRetryTracker::new(3);
+            let tracker = IterationErrorTracker::new(3);
             assert_eq!(tracker.get_count("any-feature"), 0);
         }
 
         #[test]
-        fn record_failure_increments_count() {
-            let mut tracker = FeatureRetryTracker::new(3);
-            assert_eq!(tracker.record_failure("feat-1"), 1);
-            assert_eq!(tracker.record_failure("feat-1"), 2);
-            assert_eq!(tracker.record_failure("feat-1"), 3);
+        fn record_error_increments_count() {
+            let mut tracker = IterationErrorTracker::new(3);
+            assert_eq!(tracker.record_error("feat-1"), 1);
+            assert_eq!(tracker.record_error("feat-1"), 2);
+            assert_eq!(tracker.record_error("feat-1"), 3);
             assert_eq!(tracker.get_count("feat-1"), 3);
         }
 
         #[test]
         fn tracks_multiple_features_independently() {
-            let mut tracker = FeatureRetryTracker::new(3);
-            tracker.record_failure("feat-1");
-            tracker.record_failure("feat-1");
-            tracker.record_failure("feat-2");
+            let mut tracker = IterationErrorTracker::new(3);
+            tracker.record_error("feat-1");
+            tracker.record_error("feat-1");
+            tracker.record_error("feat-2");
 
             assert_eq!(tracker.get_count("feat-1"), 2);
             assert_eq!(tracker.get_count("feat-2"), 1);
@@ -145,9 +145,9 @@ mod tests {
 
         #[test]
         fn reset_clears_feature_count() {
-            let mut tracker = FeatureRetryTracker::new(3);
-            tracker.record_failure("feat-1");
-            tracker.record_failure("feat-1");
+            let mut tracker = IterationErrorTracker::new(3);
+            tracker.record_error("feat-1");
+            tracker.record_error("feat-1");
             tracker.reset("feat-1");
 
             assert_eq!(tracker.get_count("feat-1"), 0);
@@ -155,35 +155,35 @@ mod tests {
 
         #[test]
         fn should_block_returns_true_at_max() {
-            let mut tracker = FeatureRetryTracker::new(3);
-            tracker.record_failure("feat-1");
-            tracker.record_failure("feat-1");
+            let mut tracker = IterationErrorTracker::new(3);
+            tracker.record_error("feat-1");
+            tracker.record_error("feat-1");
             assert!(!tracker.should_block("feat-1"));
 
-            tracker.record_failure("feat-1");
+            tracker.record_error("feat-1");
             assert!(tracker.should_block("feat-1"));
         }
 
         #[test]
         fn should_block_returns_false_when_disabled() {
-            let mut tracker = FeatureRetryTracker::new(0);
-            tracker.record_failure("feat-1");
-            tracker.record_failure("feat-1");
-            tracker.record_failure("feat-1");
-            tracker.record_failure("feat-1");
+            let mut tracker = IterationErrorTracker::new(0);
+            tracker.record_error("feat-1");
+            tracker.record_error("feat-1");
+            tracker.record_error("feat-1");
+            tracker.record_error("feat-1");
 
             assert!(!tracker.should_block("feat-1"));
         }
 
         #[test]
         fn is_enabled_returns_true_when_max_positive() {
-            let tracker = FeatureRetryTracker::new(3);
+            let tracker = IterationErrorTracker::new(3);
             assert!(tracker.is_enabled());
         }
 
         #[test]
         fn is_enabled_returns_false_when_max_zero() {
-            let tracker = FeatureRetryTracker::new(0);
+            let tracker = IterationErrorTracker::new(0);
             assert!(!tracker.is_enabled());
         }
     }

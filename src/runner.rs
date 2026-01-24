@@ -77,15 +77,15 @@ pub async fn run(args: Args) -> Result<()> {
     if args.max_iterations > 0 {
         output::log(&format!("Max iterations: {}", args.max_iterations));
     }
-    if args.max_feature_retries > 0 {
-        output::log(&format!("Max feature retries: {}", args.max_feature_retries));
+    if args.max_iteration_errors > 0 {
+        output::log(&format!("Max iteration errors: {}", args.max_iteration_errors));
     }
     println!();
 
     let start_time = std::time::Instant::now();
     let mut iteration: u32 = 0;
     let mut consecutive_failures: u32 = 0;
-    let mut feature_tracker = retry::FeatureRetryTracker::new(args.max_feature_retries);
+    let mut error_tracker = retry::IterationErrorTracker::new(args.max_iteration_errors);
 
     loop {
         iteration += 1;
@@ -139,16 +139,16 @@ pub async fn run(args: Args) -> Result<()> {
                     }
                     Ok(IterationResult::LoopDetected) => {
                         output::warn("Loop detection: Agent appears blocked");
-                        handle_feature_failure(&mut feature_tracker, &args.prd, &current_prd)?;
+                        handle_iteration_error(&mut error_tracker, &args.prd, &current_prd)?;
                         handle_failure(&mut consecutive_failures, iteration, start_time, &logs_dir, args.webhook.as_deref())?;
                     }
                     Ok(IterationResult::Failed) => {
-                        handle_feature_failure(&mut feature_tracker, &args.prd, &current_prd)?;
+                        handle_iteration_error(&mut error_tracker, &args.prd, &current_prd)?;
                         handle_failure(&mut consecutive_failures, iteration, start_time, &logs_dir, args.webhook.as_deref())?;
                     }
                     Err(e) => {
                         output::error(&format!("Iteration error: {e:#}"));
-                        handle_feature_failure(&mut feature_tracker, &args.prd, &current_prd)?;
+                        handle_iteration_error(&mut error_tracker, &args.prd, &current_prd)?;
                         handle_failure(&mut consecutive_failures, iteration, start_time, &logs_dir, args.webhook.as_deref())?;
                     }
                 }
@@ -233,8 +233,8 @@ fn handle_failure(
     Ok(())
 }
 
-fn handle_feature_failure(
-    tracker: &mut retry::FeatureRetryTracker,
+fn handle_iteration_error(
+    tracker: &mut retry::IterationErrorTracker,
     prd_path: &std::path::Path,
     current_prd: &prd::Prd,
 ) -> Result<()> {
@@ -243,12 +243,12 @@ fn handle_feature_failure(
     }
 
     if let Some(feature_id) = retry::get_current_feature_id(current_prd) {
-        let count = tracker.record_failure(&feature_id);
+        let count = tracker.record_error(&feature_id);
 
         if tracker.should_block(&feature_id) {
             retry::update_feature_status_to_blocked(prd_path, &feature_id)?;
         } else {
-            output::warn(&format!("Feature '{}' failure {}", feature_id, count));
+            output::warn(&format!("Feature '{}' error count: {}", feature_id, count));
         }
     }
 
