@@ -58,9 +58,9 @@ pub struct Args {
     #[arg(long)]
     pub webhook: Option<String>,
 
-    /// Maximum retries per feature before auto-blocking (0 = no auto-block)
-    #[arg(long, default_value_t = 3)]
-    pub max_feature_retries: u32,
+    /// Experimental: auto-block feature after N iteration errors (0 = disabled)
+    #[arg(long, default_value_t = 0)]
+    pub max_iteration_errors: u32,
 
     /// Timeout per Claude execution in seconds
     #[arg(short = 't', long, default_value_t = 1800)]
@@ -163,9 +163,9 @@ mod tests {
         }
 
         #[test]
-        fn max_feature_retries_defaults_to_3() {
+        fn max_iteration_errors_defaults_to_0() {
             let args = parse_args(&[]);
-            assert_eq!(args.max_feature_retries, 3);
+            assert_eq!(args.max_iteration_errors, 0);
         }
     }
 
@@ -303,15 +303,15 @@ mod tests {
         }
 
         #[test]
-        fn max_feature_retries_long_flag() {
-            let args = parse_args(&["--max-feature-retries", "5"]);
-            assert_eq!(args.max_feature_retries, 5);
+        fn max_iteration_errors_long_flag() {
+            let args = parse_args(&["--max-iteration-errors", "5"]);
+            assert_eq!(args.max_iteration_errors, 5);
         }
 
         #[test]
-        fn max_feature_retries_zero_disables() {
-            let args = parse_args(&["--max-feature-retries", "0"]);
-            assert_eq!(args.max_feature_retries, 0);
+        fn max_iteration_errors_zero_disables() {
+            let args = parse_args(&["--max-iteration-errors", "0"]);
+            assert_eq!(args.max_iteration_errors, 0);
         }
     }
 
