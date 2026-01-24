@@ -7,38 +7,50 @@ pub const PLACEHOLDER_PRD_PATH: &str = "{prd_path}";
 pub const PLACEHOLDER_PROGRESS_PATH: &str = "{progress_path}";
 pub const PLACEHOLDER_VERIFICATION_COMMANDS: &str = "{verification_commands}";
 pub const PLACEHOLDER_COMPLETION_MARKER: &str = "{completion_marker}";
-pub const PLACEHOLDER_PRD_CONTENT: &str = "{prd_content}";
 
-const PROMPT_TEMPLATE: &str = r#"# Custom Ralph Prompt Template
-#
-# Available placeholders (replaced at runtime):
-#   {prd_path}              - Path to the PRD file
-#   {progress_path}         - Path to the progress file
-#   {verification_commands} - Formatted list of verification commands
-#   {completion_marker}     - The completion marker from PRD
-#   {prd_content}           - Full contents of the PRD file
-#
-# Edit this template to customize Ralph's behavior.
+const PROMPT_TEMPLATE: &str = r#"You are an autonomous coding agent working through features defined in a PRD.
 
-You are an autonomous agent working on features defined in a PRD.
+## Important Paths
 
-## Paths
+- **PRD file**: {prd_path}
+- **Progress file**: {progress_path}
 
-- PRD: {prd_path}
-- Progress: {progress_path}
+## Rules
 
-## Verification
+1. **ONE feature per session** - Focus on a single feature from the PRD
+2. **Status-only edits** - You may ONLY change the "status" field in {prd_path}
+3. **No test removal** - Never remove or weaken existing tests
+4. **Verify before complete** - Run all verification commands before marking complete
+5. **Commit per feature** - Commit changes with descriptive messages, include only files relevant to the feature
 
-Run these commands to verify changes:
+## Verification Commands
+
+Run these commands to verify your changes:
 {verification_commands}
+
+## Workflow
+
+1. Read {prd_path} and {progress_path} for context
+2. Find the first feature with status "pending" or "in-progress"
+3. If "pending", update status to "in-progress"
+4. Implement the feature following the defined steps
+5. Run verification commands
+6. If verification passes, update feature status to "complete"
+7. If blocked (unclear requirements, missing dependencies, repeated failures), update status to "blocked"
+8. Commit your changes with a descriptive message (only feature-related files)
+9. **ALWAYS** append to {progress_path} at the end of each loop, documenting:
+   - Which feature you worked on
+   - What you accomplished
+   - Any blockers or issues encountered
+   - Current status
+10. **STOP** - Do not start another feature. The next iteration will handle remaining work.
 
 ## Completion
 
-When all features are complete, output: {completion_marker}
-
-## Current PRD
-
-{prd_content}
+When ALL features have status "complete" and all verifications pass:
+1. Append final summary to {progress_path}
+2. Make a final commit
+3. Output: {completion_marker}
 "#;
 
 pub fn generate_prompt_template(path: &Path) -> Result<()> {
@@ -57,9 +69,6 @@ pub fn substitute_placeholders(
     prd_path: &Path,
     progress_path: &Path,
 ) -> String {
-    let prd_content =
-        std::fs::read_to_string(prd_path).unwrap_or_else(|_| "Failed to read PRD".to_string());
-
     let verification_commands = format_verification_commands(prd);
 
     template
@@ -67,7 +76,6 @@ pub fn substitute_placeholders(
         .replace(PLACEHOLDER_PROGRESS_PATH, &progress_path.display().to_string())
         .replace(PLACEHOLDER_VERIFICATION_COMMANDS, &verification_commands)
         .replace(PLACEHOLDER_COMPLETION_MARKER, &prd.completion.marker)
-        .replace(PLACEHOLDER_PRD_CONTENT, &prd_content)
 }
 
 pub fn get_system_prompt(
@@ -96,65 +104,7 @@ fn format_verification_commands(prd: &Prd) -> String {
 
 #[must_use]
 pub fn build_system_prompt(prd: &Prd, prd_path: &Path, progress_path: &Path) -> String {
-    let prd_content =
-        std::fs::read_to_string(prd_path).unwrap_or_else(|_| "Failed to read PRD".to_string());
-
-    let verification_commands = format_verification_commands(prd);
-
-    format!(
-        r#"You are working autonomously in a Ralph loop. Each iteration is a fresh context window.
-
-## Important Paths
-
-- **PRD file**: {prd_path}
-- **Progress file**: {progress_path}
-
-## Rules
-
-1. **ONE feature per session** - Focus on a single feature from the PRD
-2. **Status-only edits** - You may ONLY change the "status" field in {prd_path}
-3. **No test removal** - Never remove or weaken existing tests
-4. **Verify before complete** - Run all verification commands before marking complete
-5. **Commit per feature** - Commit changes with descriptive messages, include only files relevant to the feature
-
-## Verification Commands
-
-Run these commands to verify your changes:
-{verification_commands}
-
-## Workflow
-
-1. Read {prd_path} and {progress_path} for context
-2. Find the first feature with status "pending" or "in-progress"
-3. If "pending", update status to "in-progress"
-4. Implement the feature following the defined steps
-5. Run verification commands
-6. If verification passes, update feature status to "complete"
-7. Commit your changes with a descriptive message (only feature-related files)
-8. **ALWAYS** append to {progress_path} at the end of each loop, documenting:
-   - Which feature you worked on
-   - What you accomplished
-   - Any blockers or issues encountered
-   - Current status
-9. **STOP** - Do not start another feature. The next iteration will handle remaining work.
-
-## Completion
-
-When ALL features have status "complete" and all verifications pass:
-1. Append final summary to {progress_path}
-2. Make a final commit
-3. Output: {completion_marker}
-
-## Current PRD
-
-{prd_content}
-"#,
-        prd_path = prd_path.display(),
-        progress_path = progress_path.display(),
-        verification_commands = verification_commands,
-        completion_marker = prd.completion.marker,
-        prd_content = prd_content,
-    )
+    substitute_placeholders(PROMPT_TEMPLATE, prd, prd_path, progress_path)
 }
 
 #[cfg(test)]
@@ -251,17 +201,6 @@ mod tests {
         }
 
         #[test]
-        fn contains_current_prd_section() {
-            let prd = make_test_prd(vec![], "DONE");
-            let mut prd_file = NamedTempFile::new().unwrap();
-            write!(prd_file, "{{}}").unwrap();
-
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
-
-            assert!(result.contains("## Current PRD"));
-        }
-
-        #[test]
         fn includes_prd_path_in_output() {
             let prd = make_test_prd(vec![], "DONE");
             let mut prd_file = NamedTempFile::new().unwrap();
@@ -285,53 +224,8 @@ mod tests {
         }
     }
 
-    mod prd_content_tests {
+    mod completion_marker_tests {
         use super::*;
-
-        #[test]
-        fn embeds_prd_file_content() {
-            let prd = make_test_prd(vec![], "DONE");
-            let mut prd_file = NamedTempFile::new().unwrap();
-            let prd_content = r#"{"project": {"name": "embedded-test"}}"#;
-            write!(prd_file, "{}", prd_content).unwrap();
-
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
-
-            assert!(result.contains(prd_content));
-        }
-
-        #[test]
-        fn handles_multiline_prd_content() {
-            let prd = make_test_prd(vec![], "DONE");
-            let mut prd_file = NamedTempFile::new().unwrap();
-            let prd_content = "line1\nline2\nline3";
-            write!(prd_file, "{}", prd_content).unwrap();
-
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
-
-            assert!(result.contains("line1\nline2\nline3"));
-        }
-
-        #[test]
-        fn handles_unicode_prd_content() {
-            let prd = make_test_prd(vec![], "DONE");
-            let mut prd_file = NamedTempFile::new().unwrap();
-            let prd_content = "项目: テスト 🚀";
-            write!(prd_file, "{}", prd_content).unwrap();
-
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
-
-            assert!(result.contains(prd_content));
-        }
-
-        #[test]
-        fn handles_missing_prd_file() {
-            let prd = make_test_prd(vec![], "DONE");
-
-            let result = build_system_prompt(&prd, Path::new("/nonexistent/prd.json"), Path::new("progress.txt"));
-
-            assert!(result.contains("Failed to read PRD"));
-        }
 
         #[test]
         fn includes_completion_marker_from_prd() {
@@ -480,29 +374,6 @@ mod tests {
         use super::*;
 
         #[test]
-        fn handles_empty_prd_file() {
-            let prd = make_test_prd(vec![], "DONE");
-            let mut prd_file = NamedTempFile::new().unwrap();
-            write!(prd_file, "").unwrap();
-
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
-
-            assert!(result.contains("## Current PRD"));
-        }
-
-        #[test]
-        fn handles_very_long_prd_content() {
-            let prd = make_test_prd(vec![], "DONE");
-            let mut prd_file = NamedTempFile::new().unwrap();
-            let long_content = "x".repeat(100_000);
-            write!(prd_file, "{}", long_content).unwrap();
-
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
-
-            assert!(result.contains(&long_content));
-        }
-
-        #[test]
         fn handles_paths_with_spaces() {
             let prd = make_test_prd(vec![], "DONE");
             let mut prd_file = NamedTempFile::new().unwrap();
@@ -594,16 +465,15 @@ mod tests {
                 "COMPLETE",
             );
             let mut prd_file = NamedTempFile::new().unwrap();
-            write!(prd_file, "PRD content here").unwrap();
+            write!(prd_file, "{{}}").unwrap();
 
-            let template = "Path: {prd_path}\nProgress: {progress_path}\nCommands:\n{verification_commands}\nMarker: {completion_marker}\nPRD:\n{prd_content}";
+            let template = "Path: {prd_path}\nProgress: {progress_path}\nCommands:\n{verification_commands}\nMarker: {completion_marker}";
             let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
 
             assert!(result.contains(&prd_file.path().display().to_string()));
             assert!(result.contains("progress.txt"));
             assert!(result.contains("- `cargo test` - Run tests"));
             assert!(result.contains("Marker: COMPLETE"));
-            assert!(result.contains("PRD content here"));
         }
 
         #[test]
@@ -697,15 +567,6 @@ mod tests {
             assert!(result.contains("- `cargo test` - Run tests"));
         }
 
-        #[test]
-        fn handles_missing_prd_file() {
-            let prd = make_test_prd(vec![], "DONE");
-
-            let template = "PRD: {prd_content}";
-            let result = substitute_placeholders(template, &prd, Path::new("/nonexistent"), Path::new("progress.txt"));
-
-            assert!(result.contains("Failed to read PRD"));
-        }
     }
 
     mod get_system_prompt_tests {
@@ -722,14 +583,13 @@ mod tests {
                 "COMPLETE",
             );
             let mut prd_file = NamedTempFile::new().unwrap();
-            write!(prd_file, "PRD content").unwrap();
+            write!(prd_file, "{{}}").unwrap();
 
             let result = get_system_prompt(None, &prd, prd_file.path(), Path::new("progress.txt")).unwrap();
 
             assert!(result.contains("## Important Paths"));
             assert!(result.contains("## Rules"));
             assert!(result.contains("## Workflow"));
-            assert!(result.contains("PRD content"));
         }
 
         #[test]
@@ -766,12 +626,12 @@ mod tests {
                 "MARKER",
             );
             let mut prd_file = NamedTempFile::new().unwrap();
-            write!(prd_file, "PRD file content").unwrap();
+            write!(prd_file, "{{}}").unwrap();
 
             let mut prompt_file = NamedTempFile::new().unwrap();
             write!(
                 prompt_file,
-                "PRD: {{prd_path}}\nProgress: {{progress_path}}\nCommands:\n{{verification_commands}}\nMarker: {{completion_marker}}\nContent: {{prd_content}}"
+                "PRD: {{prd_path}}\nProgress: {{progress_path}}\nCommands:\n{{verification_commands}}\nMarker: {{completion_marker}}"
             )
             .unwrap();
 
@@ -787,7 +647,6 @@ mod tests {
             assert!(result.contains("prog.txt"));
             assert!(result.contains("- `cargo check` - Type check"));
             assert!(result.contains("MARKER"));
-            assert!(result.contains("PRD file content"));
         }
 
         #[test]
@@ -840,7 +699,7 @@ mod tests {
             generate_prompt_template(&path).unwrap();
 
             let content = std::fs::read_to_string(&path).unwrap();
-            assert!(content.contains("Custom Ralph Prompt Template"));
+            assert!(content.contains("You are an autonomous coding agent"));
         }
 
         #[test]
@@ -855,20 +714,21 @@ mod tests {
             assert!(content.contains("{progress_path}"));
             assert!(content.contains("{verification_commands}"));
             assert!(content.contains("{completion_marker}"));
-            assert!(content.contains("{prd_content}"));
         }
 
         #[test]
-        fn template_contains_placeholder_documentation() {
+        fn template_contains_all_sections() {
             let dir = TempDir::new().unwrap();
             let path = dir.path().join("prompt.md");
 
             generate_prompt_template(&path).unwrap();
 
             let content = std::fs::read_to_string(&path).unwrap();
-            assert!(content.contains("Available placeholders"));
-            assert!(content.contains("Path to the PRD file"));
-            assert!(content.contains("Path to the progress file"));
+            assert!(content.contains("## Important Paths"));
+            assert!(content.contains("## Rules"));
+            assert!(content.contains("## Verification Commands"));
+            assert!(content.contains("## Workflow"));
+            assert!(content.contains("## Completion"));
         }
 
         #[test]
@@ -890,7 +750,7 @@ mod tests {
 
             let content = std::fs::read_to_string(&path).unwrap();
             assert!(!content.contains("old content"));
-            assert!(content.contains("Custom Ralph Prompt Template"));
+            assert!(content.contains("You are an autonomous coding agent"));
         }
     }
 }
