@@ -46,6 +46,10 @@ pub struct Args {
     #[arg(long)]
     pub init: bool,
 
+    /// Initialize a new custom prompt template
+    #[arg(long)]
+    pub init_prompt: bool,
+
     /// Timeout per Claude execution in seconds
     #[arg(short = 't', long, default_value_t = 1800)]
     pub timeout: u64,
@@ -114,6 +118,12 @@ mod tests {
         fn init_defaults_to_false() {
             let args = parse_args(&[]);
             assert!(!args.init);
+        }
+
+        #[test]
+        fn init_prompt_defaults_to_false() {
+            let args = parse_args(&[]);
+            assert!(!args.init_prompt);
         }
 
         #[test]
@@ -218,6 +228,12 @@ mod tests {
         fn init_flag() {
             let args = parse_args(&["--init"]);
             assert!(args.init);
+        }
+
+        #[test]
+        fn init_prompt_flag() {
+            let args = parse_args(&["--init-prompt"]);
+            assert!(args.init_prompt);
         }
 
         #[test]

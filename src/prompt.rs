@@ -1,5 +1,6 @@
 use crate::prd::Prd;
 use anyhow::{Context, Result};
+use std::fs;
 use std::path::Path;
 
 pub const PLACEHOLDER_PRD_PATH: &str = "{prd_path}";
@@ -7,6 +8,43 @@ pub const PLACEHOLDER_PROGRESS_PATH: &str = "{progress_path}";
 pub const PLACEHOLDER_VERIFICATION_COMMANDS: &str = "{verification_commands}";
 pub const PLACEHOLDER_COMPLETION_MARKER: &str = "{completion_marker}";
 pub const PLACEHOLDER_PRD_CONTENT: &str = "{prd_content}";
+
+const PROMPT_TEMPLATE: &str = r#"# Custom Ralph Prompt Template
+#
+# Available placeholders (replaced at runtime):
+#   {prd_path}              - Path to the PRD file
+#   {progress_path}         - Path to the progress file
+#   {verification_commands} - Formatted list of verification commands
+#   {completion_marker}     - The completion marker from PRD
+#   {prd_content}           - Full contents of the PRD file
+#
+# Edit this template to customize Ralph's behavior.
+
+You are an autonomous agent working on features defined in a PRD.
+
+## Paths
+
+- PRD: {prd_path}
+- Progress: {progress_path}
+
+## Verification
+
+Run these commands to verify changes:
+{verification_commands}
+
+## Completion
+
+When all features are complete, output: {completion_marker}
+
+## Current PRD
+
+{prd_content}
+"#;
+
+pub fn generate_prompt_template(path: &Path) -> Result<()> {
+    fs::write(path, PROMPT_TEMPLATE)
+        .with_context(|| format!("Failed to write prompt template to {}", path.display()))
+}
 
 pub fn load_custom_prompt(path: &Path) -> Result<String> {
     std::fs::read_to_string(path)
@@ -787,6 +825,72 @@ mod tests {
             .unwrap();
 
             assert_eq!(result, "");
+        }
+    }
+
+    mod generate_prompt_template_tests {
+        use super::*;
+        use tempfile::TempDir;
+
+        #[test]
+        fn creates_file_with_template_content() {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("prompt.md");
+
+            generate_prompt_template(&path).unwrap();
+
+            let content = std::fs::read_to_string(&path).unwrap();
+            assert!(content.contains("Custom Ralph Prompt Template"));
+        }
+
+        #[test]
+        fn template_contains_all_placeholders() {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("prompt.md");
+
+            generate_prompt_template(&path).unwrap();
+
+            let content = std::fs::read_to_string(&path).unwrap();
+            assert!(content.contains("{prd_path}"));
+            assert!(content.contains("{progress_path}"));
+            assert!(content.contains("{verification_commands}"));
+            assert!(content.contains("{completion_marker}"));
+            assert!(content.contains("{prd_content}"));
+        }
+
+        #[test]
+        fn template_contains_placeholder_documentation() {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("prompt.md");
+
+            generate_prompt_template(&path).unwrap();
+
+            let content = std::fs::read_to_string(&path).unwrap();
+            assert!(content.contains("Available placeholders"));
+            assert!(content.contains("Path to the PRD file"));
+            assert!(content.contains("Path to the progress file"));
+        }
+
+        #[test]
+        fn returns_error_for_invalid_path() {
+            let result = generate_prompt_template(Path::new("/nonexistent/dir/prompt.md"));
+
+            assert!(result.is_err());
+            let err = result.unwrap_err().to_string();
+            assert!(err.contains("Failed to write prompt template"));
+        }
+
+        #[test]
+        fn overwrites_existing_file() {
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("prompt.md");
+            std::fs::write(&path, "old content").unwrap();
+
+            generate_prompt_template(&path).unwrap();
+
+            let content = std::fs::read_to_string(&path).unwrap();
+            assert!(!content.contains("old content"));
+            assert!(content.contains("Custom Ralph Prompt Template"));
         }
     }
 }
