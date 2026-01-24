@@ -103,12 +103,16 @@ ralph                 # Run the loop
 ```
 -p, --prd <PATH>                  PRD file path [default: prd.jsonc]
 -P, --prompt <PATH>               Custom system prompt file
+-c, --completion-marker <TEXT>    Completion marker (overrides PRD)
 -m, --max-iterations <N>          Max iterations, 0=unlimited [default: 10]
 -d, --delay <SECONDS>             Delay between iterations [default: 2]
 -t, --timeout <SECONDS>           Claude timeout [default: 1800]
 --permission-mode <MODE>          default|acceptEdits|plan [default: acceptEdits]
 --continue-session                Preserve context between iterations
 --skip-init                       Skip initialization phase
+--dry-run                         Validate PRD, run verifications, exit without Claude
+--webhook <URL>                   Webhook URL for session event notifications
+--max-iteration-errors <N>        Auto-block feature after N errors [default: 0] (experimental)
 --dangerously-skip-permissions    Auto-approve all Claude actions
 --init-prompt                     Generate prompt.md template and exit
 ```
@@ -156,6 +160,38 @@ ralph --prompt prompts/python.md
 # Documentation - markdown style, grammar checks
 ralph --prompt prompts/docs.md
 ```
+
+## Webhooks
+
+Send HTTP POST notifications to a URL when session events occur:
+
+```bash
+ralph --webhook https://example.com/webhook
+```
+
+### Events
+
+| Event | Trigger |
+|-------|---------|
+| `session_start` | Session begins |
+| `session_complete` | All features completed successfully |
+| `session_failed` | Session exits due to too many failures |
+
+### Payload
+
+```json
+{
+  "event": "session_start",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "message": "Starting session for my-project"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `event` | Event type string |
+| `timestamp` | RFC3339 timestamp |
+| `message` | Human-readable description |
 
 ## Safety
 
