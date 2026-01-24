@@ -102,6 +102,7 @@ ralph                 # Run the loop
 
 ```
 -p, --prd <PATH>                  PRD file path [default: prd.jsonc]
+-P, --prompt <PATH>               Custom system prompt file
 -m, --max-iterations <N>          Max iterations, 0=unlimited [default: 10]
 -d, --delay <SECONDS>             Delay between iterations [default: 2]
 -t, --timeout <SECONDS>           Claude timeout [default: 1800]
@@ -109,6 +110,51 @@ ralph                 # Run the loop
 --continue-session                Preserve context between iterations
 --skip-init                       Skip initialization phase
 --dangerously-skip-permissions    Auto-approve all Claude actions
+--init-prompt                     Generate prompt.md template and exit
+```
+
+## Custom Prompts
+
+Ralph uses a built-in system prompt by default. To customize agent behavior, provide your own prompt file.
+
+### Generate template
+
+```bash
+ralph --init-prompt              # Creates prompt.md
+```
+
+### Use custom prompt
+
+```bash
+ralph --prompt my-prompt.md      # Use custom prompt
+ralph -P prompt.md               # Short form
+```
+
+### Placeholders
+
+Custom prompts support these placeholders, replaced at runtime:
+
+| Placeholder | Description |
+|-------------|-------------|
+| `{prd_path}` | Path to the PRD file |
+| `{progress_path}` | Path to the progress file |
+| `{verification_commands}` | Formatted list of verification commands |
+| `{completion_marker}` | Completion marker from PRD |
+| `{prd_content}` | Full contents of the PRD file |
+
+### Example use case
+
+Specialized prompts for different project types:
+
+```bash
+# Rust projects - strict linting, no unsafe
+ralph --prompt prompts/rust-strict.md
+
+# Python projects - pytest focus, type hints
+ralph --prompt prompts/python.md
+
+# Documentation - markdown style, grammar checks
+ralph --prompt prompts/docs.md
 ```
 
 ## Safety
