@@ -5,6 +5,7 @@ pub mod init;
 pub mod output;
 pub mod prd;
 pub mod prompt;
+pub mod retry;
 pub mod runner;
 pub mod validation;
 pub mod webhook;

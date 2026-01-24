@@ -58,6 +58,10 @@ pub struct Args {
     #[arg(long)]
     pub webhook: Option<String>,
 
+    /// Maximum retries per feature before auto-blocking (0 = no auto-block)
+    #[arg(long, default_value_t = 3)]
+    pub max_feature_retries: u32,
+
     /// Timeout per Claude execution in seconds
     #[arg(short = 't', long, default_value_t = 1800)]
     pub timeout: u64,
@@ -156,6 +160,12 @@ mod tests {
         fn webhook_defaults_to_none() {
             let args = parse_args(&[]);
             assert!(args.webhook.is_none());
+        }
+
+        #[test]
+        fn max_feature_retries_defaults_to_3() {
+            let args = parse_args(&[]);
+            assert_eq!(args.max_feature_retries, 3);
         }
     }
 
@@ -290,6 +300,18 @@ mod tests {
         fn webhook_long_flag() {
             let args = parse_args(&["--webhook", "https://example.com/webhook"]);
             assert_eq!(args.webhook, Some("https://example.com/webhook".to_string()));
+        }
+
+        #[test]
+        fn max_feature_retries_long_flag() {
+            let args = parse_args(&["--max-feature-retries", "5"]);
+            assert_eq!(args.max_feature_retries, 5);
+        }
+
+        #[test]
+        fn max_feature_retries_zero_disables() {
+            let args = parse_args(&["--max-feature-retries", "0"]);
+            assert_eq!(args.max_feature_retries, 0);
         }
     }
 
