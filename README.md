@@ -21,6 +21,33 @@ ralph --init          # Create template prd.jsonc
 ralph                 # Run the loop
 ```
 
+## Usage
+
+1. **Generate template** — In your project directory, run:
+   ```bash
+   ralph --init
+   ```
+   This creates a `prd.jsonc` file with the basic structure.
+
+2. **Populate the PRD** — The template needs to be filled with features for ralph to process. Start a Claude session and ask it to break down your task:
+   ```bash
+   claude
+   ```
+   Then prompt:
+   ```
+   Evaluate [YOUR TASK HERE] and break it down into implementation steps.
+   Output the result in prd.jsonc format with features array containing
+   id, category, description, steps, and status fields.
+   ```
+
+3. **Copy the output** — Replace the template content in `prd.jsonc` with Claude's structured breakdown.
+
+4. **Run the loop** — Exit Claude and start ralph:
+   ```bash
+   ralph
+   ```
+   Ralph will iterate through each feature, spawning Claude sessions to implement them one by one until all are complete.
+
 ## How It Works
 
 1. **Initialize** — Validates PRD, checks git status, shows feature summary
