@@ -1,18 +1,52 @@
 use crate::prd::Prd;
+use anyhow::{Context, Result};
 use std::path::Path;
+
+pub const PLACEHOLDER_PRD_PATH: &str = "{prd_path}";
+pub const PLACEHOLDER_PROGRESS_PATH: &str = "{progress_path}";
+pub const PLACEHOLDER_VERIFICATION_COMMANDS: &str = "{verification_commands}";
+pub const PLACEHOLDER_COMPLETION_MARKER: &str = "{completion_marker}";
+pub const PLACEHOLDER_PRD_CONTENT: &str = "{prd_content}";
+
+pub fn load_custom_prompt(path: &Path) -> Result<String> {
+    std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read custom prompt file: {}", path.display()))
+}
+
+pub fn substitute_placeholders(
+    template: &str,
+    prd: &Prd,
+    prd_path: &Path,
+    progress_path: &Path,
+) -> String {
+    let prd_content =
+        std::fs::read_to_string(prd_path).unwrap_or_else(|_| "Failed to read PRD".to_string());
+
+    let verification_commands = format_verification_commands(prd);
+
+    template
+        .replace(PLACEHOLDER_PRD_PATH, &prd_path.display().to_string())
+        .replace(PLACEHOLDER_PROGRESS_PATH, &progress_path.display().to_string())
+        .replace(PLACEHOLDER_VERIFICATION_COMMANDS, &verification_commands)
+        .replace(PLACEHOLDER_COMPLETION_MARKER, &prd.completion.marker)
+        .replace(PLACEHOLDER_PRD_CONTENT, &prd_content)
+}
+
+fn format_verification_commands(prd: &Prd) -> String {
+    prd.verification
+        .commands
+        .iter()
+        .map(|cmd| format!("- `{}` - {}", cmd.command, cmd.description))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 #[must_use]
 pub fn build_system_prompt(prd: &Prd, prd_path: &Path, progress_path: &Path) -> String {
     let prd_content =
         std::fs::read_to_string(prd_path).unwrap_or_else(|_| "Failed to read PRD".to_string());
 
-    let verification_commands: String = prd
-        .verification
-        .commands
-        .iter()
-        .map(|cmd| format!("- `{}` - {}", cmd.command, cmd.description))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let verification_commands = format_verification_commands(prd);
 
     format!(
         r#"You are working autonomously in a Ralph loop. Each iteration is a fresh context window.
@@ -435,6 +469,189 @@ mod tests {
             let result = build_system_prompt(&prd, prd_file.path(), Path::new("/absolute/path/progress.txt"));
 
             assert!(result.contains("/absolute/path/progress.txt"));
+        }
+    }
+
+    mod load_custom_prompt_tests {
+        use super::*;
+
+        #[test]
+        fn loads_valid_file() {
+            let mut file = NamedTempFile::new().unwrap();
+            let content = "Custom prompt content here";
+            write!(file, "{}", content).unwrap();
+
+            let result = load_custom_prompt(file.path()).unwrap();
+
+            assert_eq!(result, content);
+        }
+
+        #[test]
+        fn returns_error_for_missing_file() {
+            let result = load_custom_prompt(Path::new("/nonexistent/prompt.md"));
+
+            assert!(result.is_err());
+            let err = result.unwrap_err().to_string();
+            assert!(err.contains("Failed to read custom prompt file"));
+        }
+
+        #[test]
+        fn loads_empty_file() {
+            let file = NamedTempFile::new().unwrap();
+
+            let result = load_custom_prompt(file.path()).unwrap();
+
+            assert_eq!(result, "");
+        }
+
+        #[test]
+        fn loads_multiline_content() {
+            let mut file = NamedTempFile::new().unwrap();
+            let content = "Line 1\nLine 2\nLine 3";
+            write!(file, "{}", content).unwrap();
+
+            let result = load_custom_prompt(file.path()).unwrap();
+
+            assert_eq!(result, content);
+        }
+
+        #[test]
+        fn loads_unicode_content() {
+            let mut file = NamedTempFile::new().unwrap();
+            let content = "Unicode: 日本語 🚀 émojis";
+            write!(file, "{}", content).unwrap();
+
+            let result = load_custom_prompt(file.path()).unwrap();
+
+            assert_eq!(result, content);
+        }
+    }
+
+    mod substitute_placeholders_tests {
+        use super::*;
+
+        #[test]
+        fn replaces_all_placeholders() {
+            let prd = make_test_prd(
+                vec![VerifyCommand {
+                    name: "test".into(),
+                    command: "cargo test".into(),
+                    description: "Run tests".into(),
+                }],
+                "COMPLETE",
+            );
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "PRD content here").unwrap();
+
+            let template = "Path: {prd_path}\nProgress: {progress_path}\nCommands:\n{verification_commands}\nMarker: {completion_marker}\nPRD:\n{prd_content}";
+            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+
+            assert!(result.contains(&prd_file.path().display().to_string()));
+            assert!(result.contains("progress.txt"));
+            assert!(result.contains("- `cargo test` - Run tests"));
+            assert!(result.contains("Marker: COMPLETE"));
+            assert!(result.contains("PRD content here"));
+        }
+
+        #[test]
+        fn handles_partial_placeholders() {
+            let prd = make_test_prd(vec![], "DONE");
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "{{}}").unwrap();
+
+            let template = "Only path: {prd_path} and marker: {completion_marker}";
+            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("prog.txt"));
+
+            assert!(result.contains(&prd_file.path().display().to_string()));
+            assert!(result.contains("DONE"));
+            assert!(!result.contains("{prd_path}"));
+            assert!(!result.contains("{completion_marker}"));
+        }
+
+        #[test]
+        fn handles_no_placeholders() {
+            let prd = make_test_prd(vec![], "DONE");
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "{{}}").unwrap();
+
+            let template = "Static content with no placeholders";
+            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+
+            assert_eq!(result, "Static content with no placeholders");
+        }
+
+        #[test]
+        fn handles_repeated_placeholders() {
+            let prd = make_test_prd(vec![], "MARKER");
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "{{}}").unwrap();
+
+            let template = "{completion_marker} and again {completion_marker}";
+            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+
+            assert_eq!(result, "MARKER and again MARKER");
+        }
+
+        #[test]
+        fn handles_unknown_placeholders() {
+            let prd = make_test_prd(vec![], "DONE");
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "{{}}").unwrap();
+
+            let template = "Known: {completion_marker}, Unknown: {unknown_placeholder}";
+            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+
+            assert!(result.contains("Known: DONE"));
+            assert!(result.contains("{unknown_placeholder}"));
+        }
+
+        #[test]
+        fn handles_empty_verification_commands() {
+            let prd = make_test_prd(vec![], "DONE");
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "{{}}").unwrap();
+
+            let template = "Commands: {verification_commands}";
+            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+
+            assert_eq!(result, "Commands: ");
+        }
+
+        #[test]
+        fn handles_multiple_verification_commands() {
+            let prd = make_test_prd(
+                vec![
+                    VerifyCommand {
+                        name: "check".into(),
+                        command: "cargo check".into(),
+                        description: "Type check".into(),
+                    },
+                    VerifyCommand {
+                        name: "test".into(),
+                        command: "cargo test".into(),
+                        description: "Run tests".into(),
+                    },
+                ],
+                "DONE",
+            );
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "{{}}").unwrap();
+
+            let template = "{verification_commands}";
+            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+
+            assert!(result.contains("- `cargo check` - Type check"));
+            assert!(result.contains("- `cargo test` - Run tests"));
+        }
+
+        #[test]
+        fn handles_missing_prd_file() {
+            let prd = make_test_prd(vec![], "DONE");
+
+            let template = "PRD: {prd_content}";
+            let result = substitute_placeholders(template, &prd, Path::new("/nonexistent"), Path::new("progress.txt"));
+
+            assert!(result.contains("Failed to read PRD"));
         }
     }
 }
