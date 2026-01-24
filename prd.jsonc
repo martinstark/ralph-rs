@@ -77,7 +77,7 @@
         "Add mod iteration to lib.rs/main.rs",
         "Run cargo test to verify"
       ],
-      "status": "pending",
+      "status": "complete",
       "notes": "Depends on analysis module"
     },
     {
@@ -91,7 +91,7 @@
         "Update imports and documentation",
         "Run full verification suite"
       ],
-      "status": "pending",
+      "status": "complete",
       "notes": "Final cleanup after all extractions complete"
     }
   ],
