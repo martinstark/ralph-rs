@@ -1,0 +1,104 @@
+{
+  // PRD (Product Requirements Document) for Ralph autonomous loop
+  // Edit this file to define your features and verification commands.
+  //
+  // RULES FOR THE AGENT:
+  // 1. Work on ONE feature per session
+  // 2. You may ONLY update the "status" field of features
+  // 3. Run verification tests before marking any feature complete
+  // 4. Commit changes with descriptive messages
+
+  "project": {
+    "name": "ralph-rs",
+    "description": "Autonomous AI agent loop CLI that orchestrates Claude CLI to iteratively work on PRD-defined features"
+  },
+
+  "verification": {
+    "commands": [
+      {
+        "name": "check",
+        "command": "cargo check",
+        "description": "Type checking / compilation"
+      },
+      {
+        "name": "lint",
+        "command": "cargo clippy -- -D warnings",
+        "description": "Linting (strict mode)"
+      },
+      {
+        "name": "test",
+        "command": "cargo test",
+        "description": "Run test suite"
+      }
+    ],
+    "runAfterEachFeature": true
+  },
+
+  "features": [
+    {
+      "id": "extract-analysis-module",
+      "category": "refactor",
+      "description": "Extract output analysis logic into src/analysis.rs",
+      "steps": [
+        "Create src/analysis.rs with IterationResult enum, OutputAnalysisContext struct",
+        "Move detect_loop_pattern, detect_rate_limit, analyze_iteration_output functions",
+        "Move all related tests to analysis.rs",
+        "Update runner.rs to import from analysis module",
+        "Add mod analysis to lib.rs/main.rs",
+        "Run cargo test to verify"
+      ],
+      "status": "complete",
+      "notes": "Pure functions with no external dependencies - cleanest extraction"
+    },
+    {
+      "id": "extract-dry-run-module",
+      "category": "refactor",
+      "description": "Extract dry run mode into src/dry_run.rs",
+      "steps": [
+        "Create src/dry_run.rs",
+        "Move run_dry_run function",
+        "Update function signature to accept necessary params",
+        "Update runner.rs to call dry_run::run()",
+        "Add mod dry_run to lib.rs/main.rs",
+        "Run cargo test to verify"
+      ],
+      "status": "complete",
+      "notes": "Self-contained mode with no shared state"
+    },
+    {
+      "id": "extract-iteration-module",
+      "category": "refactor",
+      "description": "Extract iteration execution into src/iteration.rs",
+      "steps": [
+        "Create src/iteration.rs",
+        "Move IterationContext struct",
+        "Move run_iteration async function",
+        "Update runner.rs to use iteration module",
+        "Add mod iteration to lib.rs/main.rs",
+        "Run cargo test to verify"
+      ],
+      "status": "pending",
+      "notes": "Depends on analysis module"
+    },
+    {
+      "id": "cleanup-runner",
+      "category": "refactor",
+      "description": "Clean up runner.rs as thin orchestration layer",
+      "steps": [
+        "Review remaining code in runner.rs",
+        "Ensure only main loop orchestration remains",
+        "Remove MAX_CONSECUTIVE_FAILURES constant if moved",
+        "Update imports and documentation",
+        "Run full verification suite"
+      ],
+      "status": "pending",
+      "notes": "Final cleanup after all extractions complete"
+    }
+  ],
+
+  "completion": {
+    "allFeaturesComplete": true,
+    "allVerificationsPassing": true,
+    "marker": "<promise>COMPLETE</promise>"
+  }
+}

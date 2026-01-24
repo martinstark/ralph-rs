@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod claude;
 pub mod config;
+pub mod dry_run;
 pub mod git;
 pub mod init;
 pub mod output;
