@@ -54,6 +54,10 @@ pub struct Args {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Webhook URL for session event notifications (start, complete, failed)
+    #[arg(long)]
+    pub webhook: Option<String>,
+
     /// Timeout per Claude execution in seconds
     #[arg(short = 't', long, default_value_t = 1800)]
     pub timeout: u64,
@@ -146,6 +150,12 @@ mod tests {
         fn prompt_defaults_to_none() {
             let args = parse_args(&[]);
             assert!(args.prompt.is_none());
+        }
+
+        #[test]
+        fn webhook_defaults_to_none() {
+            let args = parse_args(&[]);
+            assert!(args.webhook.is_none());
         }
     }
 
@@ -274,6 +284,12 @@ mod tests {
         fn prompt_long_flag() {
             let args = parse_args(&["--prompt", "my-prompt.txt"]);
             assert_eq!(args.prompt, Some(PathBuf::from("my-prompt.txt")));
+        }
+
+        #[test]
+        fn webhook_long_flag() {
+            let args = parse_args(&["--webhook", "https://example.com/webhook"]);
+            assert_eq!(args.webhook, Some("https://example.com/webhook".to_string()));
         }
     }
 
