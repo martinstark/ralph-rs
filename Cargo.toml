@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Autonomous AI agent loop for iterative development"
 license = "MIT"
-repository = "https://github.com/anthropics/ralph-rs"
+repository = "https://github.com/martinstark/ralph-rs"
 keywords = ["cli", "ai", "automation", "development"]
 categories = ["command-line-utilities", "development-tools"]
 
