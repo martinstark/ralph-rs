@@ -1,3 +1,8 @@
+//! Main runner orchestration layer.
+//!
+//! Coordinates the ralph loop: setup, delegation to specialized modules,
+//! and overall session lifecycle management.
+
 use crate::{
     analysis::IterationResult,
     config::Args,
@@ -171,7 +176,6 @@ pub async fn run(args: Args) -> Result<()> {
     }
 }
 
-
 /// Handles failure by incrementing counter and checking if max failures reached.
 /// Returns Err if too many consecutive failures, Ok(()) otherwise.
 fn handle_failure(
@@ -223,5 +227,3 @@ fn handle_iteration_error(
 
     Ok(())
 }
-
-
