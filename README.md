@@ -6,6 +6,14 @@ Implemented in Rust, based on a ralph shell script that I've used to educate tea
 
 ## Install
 
+### AUR (Arch Linux)
+
+```bash
+paru -S ralph
+```
+
+### From source
+
 ```bash
 cargo install --path .
 ```
