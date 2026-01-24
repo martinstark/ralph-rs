@@ -50,6 +50,10 @@ pub struct Args {
     #[arg(long)]
     pub init_prompt: bool,
 
+    /// Dry run: validate PRD, run verifications, show plan, exit without Claude
+    #[arg(long)]
+    pub dry_run: bool,
+
     /// Timeout per Claude execution in seconds
     #[arg(short = 't', long, default_value_t = 1800)]
     pub timeout: u64,
@@ -124,6 +128,12 @@ mod tests {
         fn init_prompt_defaults_to_false() {
             let args = parse_args(&[]);
             assert!(!args.init_prompt);
+        }
+
+        #[test]
+        fn dry_run_defaults_to_false() {
+            let args = parse_args(&[]);
+            assert!(!args.dry_run);
         }
 
         #[test]
@@ -234,6 +244,12 @@ mod tests {
         fn init_prompt_flag() {
             let args = parse_args(&["--init-prompt"]);
             assert!(args.init_prompt);
+        }
+
+        #[test]
+        fn dry_run_flag() {
+            let args = parse_args(&["--dry-run"]);
+            assert!(args.dry_run);
         }
 
         #[test]
