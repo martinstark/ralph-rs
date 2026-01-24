@@ -32,6 +32,21 @@ pub fn substitute_placeholders(
         .replace(PLACEHOLDER_PRD_CONTENT, &prd_content)
 }
 
+pub fn get_system_prompt(
+    prompt_path: Option<&Path>,
+    prd: &Prd,
+    prd_path: &Path,
+    progress_path: &Path,
+) -> Result<String> {
+    match prompt_path {
+        Some(path) => {
+            let template = load_custom_prompt(path)?;
+            Ok(substitute_placeholders(&template, prd, prd_path, progress_path))
+        }
+        None => Ok(build_system_prompt(prd, prd_path, progress_path)),
+    }
+}
+
 fn format_verification_commands(prd: &Prd) -> String {
     prd.verification
         .commands
@@ -652,6 +667,126 @@ mod tests {
             let result = substitute_placeholders(template, &prd, Path::new("/nonexistent"), Path::new("progress.txt"));
 
             assert!(result.contains("Failed to read PRD"));
+        }
+    }
+
+    mod get_system_prompt_tests {
+        use super::*;
+
+        #[test]
+        fn uses_built_in_when_no_custom_path() {
+            let prd = make_test_prd(
+                vec![VerifyCommand {
+                    name: "test".into(),
+                    command: "cargo test".into(),
+                    description: "Run tests".into(),
+                }],
+                "COMPLETE",
+            );
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "PRD content").unwrap();
+
+            let result = get_system_prompt(None, &prd, prd_file.path(), Path::new("progress.txt")).unwrap();
+
+            assert!(result.contains("## Important Paths"));
+            assert!(result.contains("## Rules"));
+            assert!(result.contains("## Workflow"));
+            assert!(result.contains("PRD content"));
+        }
+
+        #[test]
+        fn uses_custom_prompt_when_path_provided() {
+            let prd = make_test_prd(vec![], "DONE");
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "PRD content here").unwrap();
+
+            let mut prompt_file = NamedTempFile::new().unwrap();
+            write!(prompt_file, "Custom prompt with {{prd_path}} and {{completion_marker}}").unwrap();
+
+            let result = get_system_prompt(
+                Some(prompt_file.path()),
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+            )
+            .unwrap();
+
+            assert!(result.contains("Custom prompt with"));
+            assert!(result.contains(&prd_file.path().display().to_string()));
+            assert!(result.contains("DONE"));
+            assert!(!result.contains("## Important Paths"));
+        }
+
+        #[test]
+        fn substitutes_all_placeholders_in_custom_prompt() {
+            let prd = make_test_prd(
+                vec![VerifyCommand {
+                    name: "check".into(),
+                    command: "cargo check".into(),
+                    description: "Type check".into(),
+                }],
+                "MARKER",
+            );
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "PRD file content").unwrap();
+
+            let mut prompt_file = NamedTempFile::new().unwrap();
+            write!(
+                prompt_file,
+                "PRD: {{prd_path}}\nProgress: {{progress_path}}\nCommands:\n{{verification_commands}}\nMarker: {{completion_marker}}\nContent: {{prd_content}}"
+            )
+            .unwrap();
+
+            let result = get_system_prompt(
+                Some(prompt_file.path()),
+                &prd,
+                prd_file.path(),
+                Path::new("prog.txt"),
+            )
+            .unwrap();
+
+            assert!(result.contains(&prd_file.path().display().to_string()));
+            assert!(result.contains("prog.txt"));
+            assert!(result.contains("- `cargo check` - Type check"));
+            assert!(result.contains("MARKER"));
+            assert!(result.contains("PRD file content"));
+        }
+
+        #[test]
+        fn returns_error_for_missing_custom_prompt_file() {
+            let prd = make_test_prd(vec![], "DONE");
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "{{}}").unwrap();
+
+            let result = get_system_prompt(
+                Some(Path::new("/nonexistent/prompt.md")),
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+            );
+
+            assert!(result.is_err());
+            let err = result.unwrap_err().to_string();
+            assert!(err.contains("Failed to read custom prompt file"));
+        }
+
+        #[test]
+        fn handles_empty_custom_prompt_file() {
+            let prd = make_test_prd(vec![], "DONE");
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "{{}}").unwrap();
+
+            let prompt_file = NamedTempFile::new().unwrap();
+
+            let result = get_system_prompt(
+                Some(prompt_file.path()),
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+            )
+            .unwrap();
+
+            assert_eq!(result, "");
         }
     }
 }
