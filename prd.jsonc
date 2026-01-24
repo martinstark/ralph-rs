@@ -1,0 +1,128 @@
+{
+  // PRD for ralph-rs unit test coverage
+
+  "project": {
+    "name": "ralph-rs",
+    "description": "Autonomous AI agent loop CLI tool"
+  },
+
+  "verification": {
+    "commands": [
+      {
+        "name": "check",
+        "command": "cargo check",
+        "description": "Type checking"
+      },
+      {
+        "name": "test",
+        "command": "cargo test",
+        "description": "Run test suite"
+      },
+      {
+        "name": "clippy",
+        "command": "cargo clippy -- -D warnings",
+        "description": "Lint checks"
+      }
+    ],
+    "runAfterEachFeature": true
+  },
+
+  "features": [
+    {
+      "id": "test-runner-detection",
+      "category": "test",
+      "description": "Unit tests for runner.rs detection functions",
+      "steps": [
+        "Step 1: Add tests for detect_loop_pattern() with various stuck message patterns",
+        "Step 2: Add tests for detect_rate_limit() with rate limit variations",
+        "Step 3: Add tests for analyze_iteration_output() covering all IterationResult variants",
+        "Step 4: Verify with cargo test"
+      ],
+      "status": "complete",
+      "notes": "Core logic, highest impact. May need to make functions pub(crate) for testing"
+    },
+    {
+      "id": "test-prd-parsing",
+      "category": "test",
+      "description": "Unit tests for prd.rs deserialization and status counting",
+      "steps": [
+        "Step 1: Add tests for Prd::load() with valid JSON5",
+        "Step 2: Add tests for status_counts() with various feature distributions",
+        "Step 3: Add tests for Status and Category enum serde roundtrips",
+        "Step 4: Add edge case tests: empty features, malformed JSON5",
+        "Step 5: Verify with cargo test"
+      ],
+      "status": "complete",
+      "notes": "Critical for correct PRD handling"
+    },
+    {
+      "id": "test-validation",
+      "category": "test",
+      "description": "Unit tests for validation.rs PRD change validation",
+      "steps": [
+        "Step 1: Add tests for is_diff_content_line() helper",
+        "Step 2: Add tests for validate_prd_changes() with valid status-only changes",
+        "Step 3: Add tests for rejected changes (non-status field modifications)",
+        "Step 4: Verify with cargo test"
+      ],
+      "status": "complete",
+      "notes": "Tests diff parsing logic and validation rules"
+    },
+    {
+      "id": "test-git-parsing",
+      "category": "test",
+      "description": "Unit tests for git.rs status parsing functions",
+      "steps": [
+        "Step 1: Add tests for current_branch() output parsing",
+        "Step 2: Add tests for uncommitted_changes_count() parsing",
+        "Step 3: Add tests for recent_commits() output parsing",
+        "Step 4: Verify with cargo test"
+      ],
+      "status": "complete",
+      "notes": "Focus on parsing logic, not git command execution"
+    },
+    {
+      "id": "test-output-formatting",
+      "category": "test",
+      "description": "Unit tests for output.rs formatting functions",
+      "steps": [
+        "Step 1: Add tests for format_duration() with 0s, 60s, 3661s, large values",
+        "Step 2: Verify edge cases: 0 minutes, 0 seconds, overflow scenarios",
+        "Step 3: Verify with cargo test"
+      ],
+      "status": "complete",
+      "notes": "Simple but important for correct output display"
+    },
+    {
+      "id": "test-prompt-generation",
+      "category": "test",
+      "description": "Unit tests for prompt.rs system prompt building",
+      "steps": [
+        "Step 1: Add tests for build_system_prompt() output structure",
+        "Step 2: Verify PRD content is correctly embedded",
+        "Step 3: Verify verification commands are included",
+        "Step 4: Verify with cargo test"
+      ],
+      "status": "complete",
+      "notes": "Ensures prompt contains all required sections"
+    },
+    {
+      "id": "test-config-defaults",
+      "category": "test",
+      "description": "Unit tests for config.rs argument defaults",
+      "steps": [
+        "Step 1: Add tests verifying Args::parse() default values",
+        "Step 2: Add tests for argument validation edge cases",
+        "Step 3: Verify with cargo test"
+      ],
+      "status": "complete",
+      "notes": "Lower priority, mostly clap-handled"
+    }
+  ],
+
+  "completion": {
+    "allFeaturesComplete": true,
+    "allVerificationsPassing": true,
+    "marker": "<promise>COMPLETE</promise>"
+  }
+}
