@@ -51,6 +51,9 @@ pub async fn run(args: Args) -> Result<()> {
     output::section("Phase 2: Ralph Loop");
     output::log(&format!("PRD file: {}", args.prd.display()));
     output::log(&format!("Progress file: {}", progress_path.display()));
+    if let Some(ref prompt_path) = args.prompt {
+        output::log(&format!("Custom prompt: {}", prompt_path.display()));
+    }
     output::log(&format!("Completion marker: {completion_marker}"));
     output::log(&format!("Permission mode: {}", args.permission_mode));
     output::log(&format!(
@@ -83,6 +86,7 @@ pub async fn run(args: Args) -> Result<()> {
             logs_dir: &logs_dir,
             completion_marker,
             project_dir,
+            prompt_path: args.prompt.as_deref(),
         };
 
         tokio::select! {
@@ -210,6 +214,7 @@ struct IterationContext<'a> {
     logs_dir: &'a std::path::Path,
     completion_marker: &'a str,
     project_dir: &'a std::path::Path,
+    prompt_path: Option<&'a std::path::Path>,
 }
 
 async fn run_iteration(
@@ -230,7 +235,12 @@ async fn run_iteration(
     );
     let log_path = ctx.logs_dir.join(log_filename);
 
-    let system_prompt = prompt::build_system_prompt(ctx.prd, &ctx.args.prd, ctx.progress_path);
+    let system_prompt = prompt::get_system_prompt(
+        ctx.prompt_path,
+        ctx.prd,
+        &ctx.args.prd,
+        ctx.progress_path,
+    )?;
 
     let claude_args = ClaudeArgs {
         permission_mode: ctx.args.permission_mode.clone(),

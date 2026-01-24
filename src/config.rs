@@ -10,6 +10,10 @@ pub struct Args {
     #[arg(short, long, default_value = "prd.jsonc")]
     pub prd: PathBuf,
 
+    /// Path to custom system prompt file (uses built-in if not specified)
+    #[arg(short = 'P', long)]
+    pub prompt: Option<PathBuf>,
+
     /// Maximum iterations (0 = unlimited)
     #[arg(short = 'm', long, default_value_t = 10)]
     pub max_iterations: u32,
@@ -117,6 +121,12 @@ mod tests {
             let args = parse_args(&[]);
             assert_eq!(args.timeout, 1800);
         }
+
+        #[test]
+        fn prompt_defaults_to_none() {
+            let args = parse_args(&[]);
+            assert!(args.prompt.is_none());
+        }
     }
 
     mod argument_overrides {
@@ -220,6 +230,18 @@ mod tests {
         fn timeout_long_flag() {
             let args = parse_args(&["--timeout", "600"]);
             assert_eq!(args.timeout, 600);
+        }
+
+        #[test]
+        fn prompt_short_flag() {
+            let args = parse_args(&["-P", "custom-prompt.md"]);
+            assert_eq!(args.prompt, Some(PathBuf::from("custom-prompt.md")));
+        }
+
+        #[test]
+        fn prompt_long_flag() {
+            let args = parse_args(&["--prompt", "my-prompt.txt"]);
+            assert_eq!(args.prompt, Some(PathBuf::from("my-prompt.txt")));
         }
     }
 
@@ -341,6 +363,18 @@ mod tests {
         fn timeout_zero() {
             let args = parse_args(&["-t", "0"]);
             assert_eq!(args.timeout, 0);
+        }
+
+        #[test]
+        fn prompt_path_with_spaces() {
+            let args = parse_args(&["-P", "path with spaces/prompt.md"]);
+            assert_eq!(args.prompt, Some(PathBuf::from("path with spaces/prompt.md")));
+        }
+
+        #[test]
+        fn prompt_path_absolute() {
+            let args = parse_args(&["-P", "/home/user/prompts/custom.md"]);
+            assert_eq!(args.prompt, Some(PathBuf::from("/home/user/prompts/custom.md")));
         }
     }
 }
