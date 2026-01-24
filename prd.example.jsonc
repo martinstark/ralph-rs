@@ -1,0 +1,57 @@
+{
+  // PRD (Product Requirements Document) for Ralph autonomous loop
+  // Edit this file to define your features and verification commands.
+  //
+  // RULES FOR THE AGENT:
+  // 1. Work on ONE feature per session
+  // 2. You may ONLY update the "status" field of features
+  // 3. Run verification tests before marking any feature complete
+  // 4. Commit changes with descriptive messages
+
+  "project": {
+    "name": "my-project",
+    "description": "Project description"
+  },
+
+  "verification": {
+    "commands": [
+      {
+        "name": "check",
+        "command": "cargo check",
+        "description": "Type checking / compilation"
+      },
+      {
+        "name": "lint",
+        "command": "cargo clippy -- -D warnings",
+        "description": "Linting (strict mode)"
+      },
+      {
+        "name": "test",
+        "command": "cargo test",
+        "description": "Run test suite"
+      }
+    ],
+    "runAfterEachFeature": true
+  },
+
+  "features": [
+    {
+      "id": "example-feature",
+      "category": "feat",
+      "description": "Example feature description",
+      "steps": [
+        "Step 1: Do something",
+        "Step 2: Do something else",
+        "Step 3: Verify it works"
+      ],
+      "status": "pending",
+      "notes": "Optional notes about this feature"
+    }
+  ],
+
+  "completion": {
+    "allFeaturesComplete": false,
+    "allVerificationsPassing": false,
+    "marker": "<promise>COMPLETE</promise>"
+  }
+}
