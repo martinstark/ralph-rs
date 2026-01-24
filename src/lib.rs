@@ -4,6 +4,7 @@ pub mod config;
 pub mod dry_run;
 pub mod git;
 pub mod init;
+pub mod iteration;
 pub mod output;
 pub mod prd;
 pub mod prompt;

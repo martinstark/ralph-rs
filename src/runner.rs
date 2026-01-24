@@ -1,12 +1,12 @@
 use crate::{
-    analysis::{analyze_iteration_output, IterationResult, OutputAnalysisContext},
-    claude::{self, ClaudeArgs},
+    analysis::IterationResult,
     config::Args,
-    dry_run, git, init, output, prd, prompt, retry, validation,
+    dry_run, init,
+    iteration::{self, IterationContext},
+    output, prd, retry,
     webhook::{self, EventType},
 };
 use anyhow::{bail, Context, Result};
-use chrono::Local;
 use tokio::signal;
 use tokio::time::{sleep, Duration};
 use tokio_util::sync::CancellationToken;
@@ -114,7 +114,7 @@ pub async fn run(args: Args) -> Result<()> {
                 output::log(&format!("Total runtime: {}", output::format_duration(duration)));
                 return Ok(());
             }
-            result = run_iteration(iteration, &ctx, &cancel_token) => {
+            result = iteration::run(iteration, &ctx, &cancel_token) => {
                 match result {
                     Ok(IterationResult::Continue) => {
                         consecutive_failures = 0;
@@ -224,70 +224,4 @@ fn handle_iteration_error(
     Ok(())
 }
 
-struct IterationContext<'a> {
-    args: &'a Args,
-    prd: &'a prd::Prd,
-    progress_path: &'a std::path::Path,
-    logs_dir: &'a std::path::Path,
-    completion_marker: &'a str,
-    project_dir: &'a std::path::Path,
-    prompt_path: Option<&'a std::path::Path>,
-}
-
-async fn run_iteration(
-    iteration: u32,
-    ctx: &IterationContext<'_>,
-    cancel_token: &CancellationToken,
-) -> Result<IterationResult> {
-    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
-    output::log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    output::log(&format!("Iteration {iteration} - {timestamp}"));
-    output::log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!();
-
-    let log_filename = format!(
-        "{}-iteration-{}.log",
-        Local::now().format("%Y%m%d-%H%M%S"),
-        iteration
-    );
-    let log_path = ctx.logs_dir.join(log_filename);
-
-    let system_prompt = prompt::get_system_prompt(
-        ctx.prompt_path,
-        ctx.prd,
-        &ctx.args.prd,
-        ctx.progress_path,
-    )?;
-
-    let claude_args = ClaudeArgs {
-        permission_mode: ctx.args.permission_mode.clone(),
-        continue_session: ctx.args.continue_session,
-        dangerously_skip_permissions: ctx.args.dangerously_skip_permissions,
-        timeout_secs: ctx.args.timeout,
-        project_dir: ctx.project_dir,
-    };
-
-    let result = claude::run_claude(&system_prompt, &claude_args, &log_path, cancel_token).await?;
-
-    if result.success {
-        output::success(&format!("Iteration {iteration} completed"));
-    } else {
-        output::warn(&format!("Iteration {iteration} exited with error"));
-    }
-
-    if git::is_git_repo() {
-        if let Err(e) = validation::validate_prd_changes(&ctx.args.prd.to_string_lossy()) {
-            output::error(&format!("PRD validation failed: {e}"));
-            return Ok(IterationResult::Failed);
-        }
-    } else {
-        output::warn("Not a git repository - skipping PRD validation");
-    }
-
-    let analysis_ctx = OutputAnalysisContext {
-        success: result.success,
-        completion_marker: ctx.completion_marker,
-    };
-    Ok(analyze_iteration_output(&result.output, &analysis_ctx))
-}
 
