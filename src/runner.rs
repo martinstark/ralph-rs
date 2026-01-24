@@ -2,6 +2,7 @@ use crate::{
     claude::{self, ClaudeArgs},
     config::Args,
     git, init, output, prd, prompt, validation,
+    webhook::{self, EventType},
 };
 use anyhow::{bail, Context, Result};
 use chrono::Local;
@@ -46,6 +47,10 @@ pub async fn run(args: Args) -> Result<()> {
 
     if !args.skip_init {
         init::run_init_phase(&prd, &args.prd, &progress_path)?;
+    }
+
+    if let Some(ref url) = args.webhook {
+        webhook::send_webhook(url, EventType::SessionStart, &format!("Starting session for {}", prd.project.name));
     }
 
     let completion_marker = args
@@ -117,6 +122,9 @@ pub async fn run(args: Args) -> Result<()> {
                         output::log(&format!("Total iterations: {iteration}"));
                         output::log(&format!("Total runtime: {}", output::format_duration(duration)));
                         output::log(&format!("Logs saved to: {}", logs_dir.display()));
+                        if let Some(ref url) = args.webhook {
+                            webhook::send_webhook(url, EventType::SessionComplete, &format!("Session complete after {iteration} iterations"));
+                        }
                         return Ok(());
                     }
                     Ok(IterationResult::RateLimit) => {
@@ -125,14 +133,14 @@ pub async fn run(args: Args) -> Result<()> {
                     }
                     Ok(IterationResult::LoopDetected) => {
                         output::warn("Loop detection: Agent appears blocked");
-                        handle_failure(&mut consecutive_failures, iteration, start_time, &logs_dir)?;
+                        handle_failure(&mut consecutive_failures, iteration, start_time, &logs_dir, args.webhook.as_deref())?;
                     }
                     Ok(IterationResult::Failed) => {
-                        handle_failure(&mut consecutive_failures, iteration, start_time, &logs_dir)?;
+                        handle_failure(&mut consecutive_failures, iteration, start_time, &logs_dir, args.webhook.as_deref())?;
                     }
                     Err(e) => {
                         output::error(&format!("Iteration error: {e:#}"));
-                        handle_failure(&mut consecutive_failures, iteration, start_time, &logs_dir)?;
+                        handle_failure(&mut consecutive_failures, iteration, start_time, &logs_dir, args.webhook.as_deref())?;
                     }
                 }
             }
@@ -193,6 +201,7 @@ fn handle_failure(
     iteration: u32,
     start_time: std::time::Instant,
     logs_dir: &std::path::Path,
+    webhook_url: Option<&str>,
 ) -> Result<()> {
     *consecutive_failures += 1;
     if *consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
@@ -207,6 +216,9 @@ fn handle_failure(
         output::log(&format!("Total iterations: {iteration}"));
         output::log(&format!("Total runtime: {}", output::format_duration(duration)));
         output::log(&format!("Logs saved to: {}", logs_dir.display()));
+        if let Some(url) = webhook_url {
+            webhook::send_webhook(url, EventType::SessionFailed, &format!("Session failed after {iteration} iterations: too many consecutive failures"));
+        }
         bail!("Too many consecutive failures");
     }
     Ok(())
