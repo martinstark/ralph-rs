@@ -47,7 +47,7 @@ Run these commands to verify your changes:
 
 ## Completion
 
-When ALL features have status "complete" and all verifications pass:
+When ALL features have status "complete" or "blocked" and all verifications pass:
 1. Append final summary to {progress_path}
 2. Make a final commit
 3. Output: {completion_marker}
