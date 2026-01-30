@@ -110,7 +110,7 @@ pub fn build_system_prompt(prd: &Prd, prd_path: &Path, progress_path: &Path) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prd::{Category, Completion, Feature, Project, Status, Verification, VerifyCommand};
+    use crate::prd::{Completion, Feature, Project, Status, Verification, VerifyCommand};
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -127,7 +127,7 @@ mod tests {
             },
             features: vec![Feature {
                 id: "feat-1".into(),
-                category: Category::Functional,
+                category: "functional".into(),
                 description: "Test feature".into(),
                 steps: vec!["Step 1".into()],
                 status: Status::Pending,

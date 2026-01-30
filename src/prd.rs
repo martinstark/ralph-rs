@@ -34,7 +34,7 @@ pub struct VerifyCommand {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Feature {
     pub id: String,
-    pub category: Category,
+    pub category: String,
     pub description: String,
     pub steps: Vec<String>,
     pub status: Status,
@@ -48,16 +48,6 @@ pub enum Status {
     InProgress,
     Complete,
     Blocked,
-}
-
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq, Clone, Copy)]
-#[serde(rename_all = "lowercase")]
-pub enum Category {
-    Functional,
-    Bugfix,
-    Refactor,
-    Test,
-    Docs,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -243,7 +233,7 @@ mod tests {
             let prd = Prd::load(file.path()).unwrap();
             let feat = &prd.features[0];
             assert_eq!(feat.id, "feat-1");
-            assert_eq!(feat.category, Category::Functional);
+            assert_eq!(feat.category, "functional");
             assert_eq!(feat.description, "First");
             assert_eq!(feat.steps, vec!["step1"]);
             assert_eq!(feat.status, Status::Pending);
@@ -361,38 +351,11 @@ mod tests {
         }
 
         #[test]
-        fn category_serializes_to_lowercase() {
-            assert_eq!(serde_json::to_string(&Category::Functional).unwrap(), "\"functional\"");
-            assert_eq!(serde_json::to_string(&Category::Bugfix).unwrap(), "\"bugfix\"");
-            assert_eq!(serde_json::to_string(&Category::Refactor).unwrap(), "\"refactor\"");
-            assert_eq!(serde_json::to_string(&Category::Test).unwrap(), "\"test\"");
-            assert_eq!(serde_json::to_string(&Category::Docs).unwrap(), "\"docs\"");
-        }
-
-        #[test]
-        fn category_deserializes_from_lowercase() {
-            assert_eq!(serde_json::from_str::<Category>("\"functional\"").unwrap(), Category::Functional);
-            assert_eq!(serde_json::from_str::<Category>("\"bugfix\"").unwrap(), Category::Bugfix);
-            assert_eq!(serde_json::from_str::<Category>("\"refactor\"").unwrap(), Category::Refactor);
-            assert_eq!(serde_json::from_str::<Category>("\"test\"").unwrap(), Category::Test);
-            assert_eq!(serde_json::from_str::<Category>("\"docs\"").unwrap(), Category::Docs);
-        }
-
-        #[test]
         fn status_roundtrip() {
             for status in [Status::Pending, Status::InProgress, Status::Complete, Status::Blocked] {
                 let json = serde_json::to_string(&status).unwrap();
                 let back: Status = serde_json::from_str(&json).unwrap();
                 assert_eq!(back, status);
-            }
-        }
-
-        #[test]
-        fn category_roundtrip() {
-            for cat in [Category::Functional, Category::Bugfix, Category::Refactor, Category::Test, Category::Docs] {
-                let json = serde_json::to_string(&cat).unwrap();
-                let back: Category = serde_json::from_str(&json).unwrap();
-                assert_eq!(back, cat);
             }
         }
 
@@ -403,9 +366,22 @@ mod tests {
         }
 
         #[test]
-        fn invalid_category_fails() {
-            assert!(serde_json::from_str::<Category>("\"unknown\"").is_err());
-            assert!(serde_json::from_str::<Category>("\"FUNCTIONAL\"").is_err());
+        fn category_accepts_any_string() {
+            let json = r#"{
+                "project": { "name": "test", "description": "desc" },
+                "verification": { "commands": [], "runAfterEachFeature": true },
+                "features": [
+                    { "id": "f1", "category": "custom-category", "description": "d", "steps": [], "status": "pending" },
+                    { "id": "f2", "category": "My Feature Type", "description": "d", "steps": [], "status": "pending" }
+                ],
+                "completion": { "allFeaturesComplete": true, "allVerificationsPassing": true, "marker": "X" }
+            }"#;
+            let mut file = tempfile::NamedTempFile::new().unwrap();
+            std::io::Write::write_all(&mut file, json.as_bytes()).unwrap();
+
+            let prd = Prd::load(file.path()).unwrap();
+            assert_eq!(prd.features[0].category, "custom-category");
+            assert_eq!(prd.features[1].category, "My Feature Type");
         }
     }
 
