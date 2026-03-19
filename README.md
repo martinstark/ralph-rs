@@ -27,6 +27,9 @@ cd <project>
 ralph --init          # Create template prd.jsonc
 # Edit prd.jsonc with your features
 ralph                 # Run the loop
+
+# sandboxing and using --dangerously-skip-permissions
+# is recommended to avoid getting stuck on approval
 ```
 
 ## Usage
