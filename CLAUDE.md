@@ -1,6 +1,6 @@
 # ralph-rs
 
-Autonomous AI agent loop CLI. Orchestrates Claude CLI to iteratively work on features defined in a PRD (JSON5), tracking progress until completion.
+Autonomous AI agent loop CLI. Orchestrates Codex CLI or Claude CLI to iteratively work on features defined in a PRD (JSON5), tracking progress until completion.
 
 ## Toolchain
 
