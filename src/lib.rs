@@ -1,5 +1,5 @@
+pub mod agent;
 pub mod analysis;
-pub mod claude;
 pub mod config;
 pub mod dry_run;
 pub mod git;

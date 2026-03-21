@@ -1,5 +1,24 @@
-use clap::Parser;
+use anyhow::{bail, Result};
+use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
+
+pub const DEFAULT_CLAUDE_PERMISSION_MODE: &str = "acceptEdits";
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum AgentCli {
+    Codex,
+    Claude,
+}
+
+impl AgentCli {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::Claude => "claude",
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "ralph")]
@@ -26,15 +45,19 @@ pub struct Args {
     #[arg(short, long)]
     pub completion_marker: Option<String>,
 
+    /// Agent CLI to use
+    #[arg(long, value_enum, default_value_t = AgentCli::Claude)]
+    pub agent: AgentCli,
+
     /// Claude permission mode: default, acceptEdits, plan
-    #[arg(long, default_value = "acceptEdits")]
+    #[arg(long, default_value = DEFAULT_CLAUDE_PERMISSION_MODE)]
     pub permission_mode: String,
 
-    /// Use --continue mode (preserves session context)
+    /// Continue the previous Claude session instead of starting fresh
     #[arg(long)]
     pub continue_session: bool,
 
-    /// Skip all permission prompts
+    /// Skip all permission prompts/sandboxing when supported by the selected agent
     #[arg(long)]
     pub dangerously_skip_permissions: bool,
 
@@ -50,7 +73,7 @@ pub struct Args {
     #[arg(long)]
     pub init_prompt: bool,
 
-    /// Dry run: validate PRD, run verifications, show plan, exit without Claude
+    /// Dry run: validate PRD, run verifications, show plan, exit without launching an agent
     #[arg(long)]
     pub dry_run: bool,
 
@@ -62,9 +85,24 @@ pub struct Args {
     #[arg(long, default_value_t = 0)]
     pub max_iteration_errors: u32,
 
-    /// Timeout per Claude execution in seconds
+    /// Timeout per agent execution in seconds
     #[arg(short = 't', long, default_value_t = 1800)]
     pub timeout: u64,
+}
+
+impl Args {
+    pub fn validate(&self) -> Result<()> {
+        if self.agent == AgentCli::Codex {
+            if self.continue_session {
+                bail!("--continue-session is only supported with --agent claude");
+            }
+            if self.permission_mode != DEFAULT_CLAUDE_PERMISSION_MODE {
+                bail!("--permission-mode is only supported with --agent claude");
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -103,9 +141,15 @@ mod tests {
         }
 
         #[test]
+        fn agent_defaults_to_claude() {
+            let args = parse_args(&[]);
+            assert_eq!(args.agent, AgentCli::Claude);
+        }
+
+        #[test]
         fn permission_mode_defaults_to_accept_edits() {
             let args = parse_args(&[]);
-            assert_eq!(args.permission_mode, "acceptEdits");
+            assert_eq!(args.permission_mode, DEFAULT_CLAUDE_PERMISSION_MODE);
         }
 
         #[test]
@@ -231,6 +275,12 @@ mod tests {
         }
 
         #[test]
+        fn agent_override() {
+            let args = parse_args(&["--agent", "claude"]);
+            assert_eq!(args.agent, AgentCli::Claude);
+        }
+
+        #[test]
         fn permission_mode_override() {
             let args = parse_args(&["--permission-mode", "plan"]);
             assert_eq!(args.permission_mode, "plan");
@@ -299,7 +349,10 @@ mod tests {
         #[test]
         fn webhook_long_flag() {
             let args = parse_args(&["--webhook", "https://example.com/webhook"]);
-            assert_eq!(args.webhook, Some("https://example.com/webhook".to_string()));
+            assert_eq!(
+                args.webhook,
+                Some("https://example.com/webhook".to_string())
+            );
         }
 
         #[test]
@@ -412,6 +465,12 @@ mod tests {
         }
 
         #[test]
+        fn invalid_agent_rejected() {
+            let result = try_parse_args(&["--agent", "other"]);
+            assert!(result.is_err());
+        }
+
+        #[test]
         fn large_max_iterations() {
             let args = parse_args(&["-m", "4294967295"]);
             assert_eq!(args.max_iterations, u32::MAX);
@@ -438,13 +497,59 @@ mod tests {
         #[test]
         fn prompt_path_with_spaces() {
             let args = parse_args(&["-P", "path with spaces/prompt.md"]);
-            assert_eq!(args.prompt, Some(PathBuf::from("path with spaces/prompt.md")));
+            assert_eq!(
+                args.prompt,
+                Some(PathBuf::from("path with spaces/prompt.md"))
+            );
         }
 
         #[test]
         fn prompt_path_absolute() {
             let args = parse_args(&["-P", "/home/user/prompts/custom.md"]);
-            assert_eq!(args.prompt, Some(PathBuf::from("/home/user/prompts/custom.md")));
+            assert_eq!(
+                args.prompt,
+                Some(PathBuf::from("/home/user/prompts/custom.md"))
+            );
+        }
+    }
+
+    mod validation {
+        use super::*;
+
+        fn parse_args(args: &[&str]) -> Args {
+            Args::try_parse_from(std::iter::once("ralph").chain(args.iter().copied())).unwrap()
+        }
+
+        #[test]
+        fn codex_accepts_default_permission_mode() {
+            let args = parse_args(&["--agent", "codex"]);
+            assert!(args.validate().is_ok());
+        }
+
+        #[test]
+        fn codex_rejects_continue_session() {
+            let args = parse_args(&["--agent", "codex", "--continue-session"]);
+            let err = args.validate().unwrap_err().to_string();
+            assert!(err.contains("--continue-session"));
+        }
+
+        #[test]
+        fn codex_rejects_custom_permission_mode() {
+            let args = parse_args(&["--agent", "codex", "--permission-mode", "plan"]);
+            let err = args.validate().unwrap_err().to_string();
+            assert!(err.contains("--permission-mode"));
+        }
+
+        #[test]
+        fn claude_accepts_provider_specific_flags() {
+            let args = parse_args(&[
+                "--agent",
+                "claude",
+                "--continue-session",
+                "--permission-mode",
+                "plan",
+            ]);
+            assert!(args.validate().is_ok());
         }
     }
 }

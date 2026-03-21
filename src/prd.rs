@@ -80,15 +80,17 @@ impl Prd {
 
     #[must_use]
     pub fn status_counts(&self) -> StatusCounts {
-        self.features.iter().fold(StatusCounts::default(), |mut c, f| {
-            match f.status {
-                Status::Pending => c.pending += 1,
-                Status::InProgress => c.in_progress += 1,
-                Status::Complete => c.complete += 1,
-                Status::Blocked => c.blocked += 1,
-            }
-            c
-        })
+        self.features
+            .iter()
+            .fold(StatusCounts::default(), |mut c, f| {
+                match f.status {
+                    Status::Pending => c.pending += 1,
+                    Status::InProgress => c.in_progress += 1,
+                    Status::Complete => c.complete += 1,
+                    Status::Blocked => c.blocked += 1,
+                }
+                c
+            })
     }
 }
 
@@ -218,7 +220,10 @@ mod tests {
 
             let prd = Prd::load(file.path()).unwrap();
             assert_eq!(prd.project.name, "my-project");
-            assert_eq!(prd.project.repository, Some("https://github.com/example/repo".into()));
+            assert_eq!(
+                prd.project.repository,
+                Some("https://github.com/example/repo".into())
+            );
             assert_eq!(prd.verification.commands.len(), 1);
             assert!(!prd.verification.run_after_each_feature);
             assert_eq!(prd.features.len(), 5);
@@ -336,23 +341,52 @@ mod tests {
 
         #[test]
         fn status_serializes_to_kebab_case() {
-            assert_eq!(serde_json::to_string(&Status::Pending).unwrap(), "\"pending\"");
-            assert_eq!(serde_json::to_string(&Status::InProgress).unwrap(), "\"in-progress\"");
-            assert_eq!(serde_json::to_string(&Status::Complete).unwrap(), "\"complete\"");
-            assert_eq!(serde_json::to_string(&Status::Blocked).unwrap(), "\"blocked\"");
+            assert_eq!(
+                serde_json::to_string(&Status::Pending).unwrap(),
+                "\"pending\""
+            );
+            assert_eq!(
+                serde_json::to_string(&Status::InProgress).unwrap(),
+                "\"in-progress\""
+            );
+            assert_eq!(
+                serde_json::to_string(&Status::Complete).unwrap(),
+                "\"complete\""
+            );
+            assert_eq!(
+                serde_json::to_string(&Status::Blocked).unwrap(),
+                "\"blocked\""
+            );
         }
 
         #[test]
         fn status_deserializes_from_kebab_case() {
-            assert_eq!(serde_json::from_str::<Status>("\"pending\"").unwrap(), Status::Pending);
-            assert_eq!(serde_json::from_str::<Status>("\"in-progress\"").unwrap(), Status::InProgress);
-            assert_eq!(serde_json::from_str::<Status>("\"complete\"").unwrap(), Status::Complete);
-            assert_eq!(serde_json::from_str::<Status>("\"blocked\"").unwrap(), Status::Blocked);
+            assert_eq!(
+                serde_json::from_str::<Status>("\"pending\"").unwrap(),
+                Status::Pending
+            );
+            assert_eq!(
+                serde_json::from_str::<Status>("\"in-progress\"").unwrap(),
+                Status::InProgress
+            );
+            assert_eq!(
+                serde_json::from_str::<Status>("\"complete\"").unwrap(),
+                Status::Complete
+            );
+            assert_eq!(
+                serde_json::from_str::<Status>("\"blocked\"").unwrap(),
+                Status::Blocked
+            );
         }
 
         #[test]
         fn status_roundtrip() {
-            for status in [Status::Pending, Status::InProgress, Status::Complete, Status::Blocked] {
+            for status in [
+                Status::Pending,
+                Status::InProgress,
+                Status::Complete,
+                Status::Blocked,
+            ] {
                 let json = serde_json::to_string(&status).unwrap();
                 let back: Status = serde_json::from_str(&json).unwrap();
                 assert_eq!(back, status);

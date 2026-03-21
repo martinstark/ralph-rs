@@ -1,6 +1,6 @@
 # ralph
 
-Autonomous AI agent loop for Claude Code CLI. Iteratively works through features defined in a PRD until completion.
+Autonomous AI agent loop for Codex CLI or Claude Code CLI. Iteratively works through features defined in a PRD until completion.
 
 Implemented in Rust, based on a ralph shell script that I've used to educate teams and deploy code to production.
 
@@ -18,7 +18,7 @@ paru -S ralph
 cargo install --path .
 ```
 
-Requires [Claude CLI](https://github.com/anthropics/claude-code) in PATH.
+Requires either [`codex`](https://openai.com/codex/) or [Claude CLI](https://github.com/anthropics/claude-code) in PATH.
 
 ## Quick Start
 
@@ -40,9 +40,9 @@ ralph                 # Run the loop
    ```
    This creates a `prd.jsonc` file with the basic structure.
 
-2. **Populate the PRD** — The template needs to be filled with features for ralph to process. Start a Claude session and ask it to break down your task:
+2. **Populate the PRD** — The template needs to be filled with features for ralph to process. Start an agent session and ask it to break down your task:
    ```bash
-   claude
+   codex
    ```
    Then prompt:
    ```
@@ -51,20 +51,25 @@ ralph                 # Run the loop
    id, category, description, steps, and status fields.
    ```
 
-3. **Copy the output** — Replace the template content in `prd.jsonc` with Claude's structured breakdown.
+3. **Copy the output** — Replace the template content in `prd.jsonc` with the agent's structured breakdown.
 
-4. **Run the loop** — Exit Claude and start ralph:
+4. **Run the loop** — Exit the agent session and start ralph:
    ```bash
    ralph
    ```
-   Ralph will iterate through each feature, spawning Claude sessions to implement them one by one until all are complete.
+   Ralph will iterate through each feature, spawning Codex sessions by default to implement them one by one until all are complete.
+
+   To use Claude instead:
+   ```bash
+   ralph --agent claude
+   ```
 
 ## How It Works
 
 1. **Initialize** — Validates PRD, checks git status, shows feature summary
 2. **Loop** — For each iteration:
-   - Spawns Claude with PRD context
-   - Claude implements one pending feature
+   - Spawns the selected agent CLI with PRD context
+   - The agent implements one pending feature
    - Validates only status field was modified
    - Commits changes, updates progress
    - Repeats until all features complete
@@ -109,14 +114,15 @@ ralph                 # Run the loop
 -c, --completion-marker <TEXT>    Completion marker (overrides PRD)
 -m, --max-iterations <N>          Max iterations, 0=unlimited [default: 10]
 -d, --delay <SECONDS>             Delay between iterations [default: 2]
--t, --timeout <SECONDS>           Claude timeout [default: 1800]
---permission-mode <MODE>          default|acceptEdits|plan [default: acceptEdits]
---continue-session                Preserve context between iterations
+-t, --timeout <SECONDS>           Agent timeout [default: 1800]
+--agent <AGENT>                   codex|claude [default: codex]
+--permission-mode <MODE>          Claude-only: default|acceptEdits|plan [default: acceptEdits]
+--continue-session                Claude-only: preserve context between iterations
 --skip-init                       Skip initialization phase
---dry-run                         Validate PRD, run verifications, exit without Claude
+--dry-run                         Validate PRD, run verifications, exit without launching an agent
 --webhook <URL>                   Webhook URL for session event notifications
 --max-iteration-errors <N>        Auto-block feature after N errors [default: 0] (experimental)
---dangerously-skip-permissions    Auto-approve all Claude actions
+--dangerously-skip-permissions    Auto-approve all agent actions when supported
 --init-prompt                     Generate prompt.md template and exit
 ```
 

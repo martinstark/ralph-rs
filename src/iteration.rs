@@ -1,6 +1,6 @@
 use crate::{
+    agent::{self, AgentArgs},
     analysis::{analyze_iteration_output, IterationResult, OutputAnalysisContext},
-    claude::{self, ClaudeArgs},
     config::Args,
     git, output, prd, prompt, validation,
 };
@@ -37,22 +37,20 @@ pub async fn run(
     );
     let log_path = ctx.logs_dir.join(log_filename);
 
-    let system_prompt = prompt::get_system_prompt(
-        ctx.prompt_path,
-        ctx.prd,
-        &ctx.args.prd,
-        ctx.progress_path,
-    )?;
+    let system_prompt =
+        prompt::get_system_prompt(ctx.prompt_path, ctx.prd, &ctx.args.prd, ctx.progress_path)?;
 
-    let claude_args = ClaudeArgs {
-        permission_mode: ctx.args.permission_mode.clone(),
+    let agent_args = AgentArgs {
+        cli: ctx.args.agent,
+        permission_mode: &ctx.args.permission_mode,
         continue_session: ctx.args.continue_session,
         dangerously_skip_permissions: ctx.args.dangerously_skip_permissions,
         timeout_secs: ctx.args.timeout,
         project_dir: ctx.project_dir,
+        skip_git_repo_check: !git::is_git_repo_at(ctx.project_dir),
     };
 
-    let result = claude::run_claude(&system_prompt, &claude_args, &log_path, cancel_token).await?;
+    let result = agent::run_agent(&system_prompt, &agent_args, &log_path, cancel_token).await?;
 
     if result.success {
         output::success(&format!("Iteration {iteration} completed"));

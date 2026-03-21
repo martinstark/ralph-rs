@@ -31,6 +31,8 @@ pub async fn run(args: Args) -> Result<()> {
         return dry_run::run(&args, &prd);
     }
 
+    args.validate()?;
+
     let project_dir = args
         .prd
         .parent()
@@ -40,8 +42,7 @@ pub async fn run(args: Args) -> Result<()> {
     let ralph_dir = project_dir.join(".ralph");
     let logs_dir = ralph_dir.join("logs");
 
-    std::fs::create_dir_all(&logs_dir)
-        .context("Failed to create .ralph/logs directory")?;
+    std::fs::create_dir_all(&logs_dir).context("Failed to create .ralph/logs directory")?;
 
     if !progress_path.exists() {
         std::fs::write(
@@ -55,7 +56,11 @@ pub async fn run(args: Args) -> Result<()> {
     }
 
     if let Some(ref url) = args.webhook {
-        webhook::send_webhook(url, EventType::SessionStart, &format!("Starting session for {}", prd.project.name));
+        webhook::send_webhook(
+            url,
+            EventType::SessionStart,
+            &format!("Starting session for {}", prd.project.name),
+        );
     }
 
     let completion_marker = args
@@ -70,20 +75,36 @@ pub async fn run(args: Args) -> Result<()> {
         output::log(&format!("Custom prompt: {}", prompt_path.display()));
     }
     output::log(&format!("Completion marker: {completion_marker}"));
-    output::log(&format!("Permission mode: {}", args.permission_mode));
-    output::log(&format!(
-        "Session mode: {}",
-        if args.continue_session {
-            "continue (preserves context)"
-        } else {
-            "print (fresh each iteration)"
+    output::log(&format!("Agent CLI: {}", args.agent.as_str()));
+    match args.agent {
+        crate::config::AgentCli::Claude => {
+            output::log(&format!("Permission mode: {}", args.permission_mode));
+            output::log(&format!(
+                "Session mode: {}",
+                if args.continue_session {
+                    "continue (preserves context)"
+                } else {
+                    "print (fresh each iteration)"
+                }
+            ));
         }
-    ));
+        crate::config::AgentCli::Codex => {
+            let mode = if args.dangerously_skip_permissions {
+                "exec --dangerously-bypass-approvals-and-sandbox"
+            } else {
+                "exec --full-auto"
+            };
+            output::log(&format!("Execution mode: {mode} (fresh each iteration)"));
+        }
+    }
     if args.max_iterations > 0 {
         output::log(&format!("Max iterations: {}", args.max_iterations));
     }
     if args.max_iteration_errors > 0 {
-        output::log(&format!("Max iteration errors: {}", args.max_iteration_errors));
+        output::log(&format!(
+            "Max iteration errors: {}",
+            args.max_iteration_errors
+        ));
     }
     println!();
 
@@ -164,7 +185,10 @@ pub async fn run(args: Args) -> Result<()> {
             println!();
             output::warn(&format!("Max iterations ({}) reached", args.max_iterations));
             let duration = start_time.elapsed();
-            output::log(&format!("Total runtime: {}", output::format_duration(duration)));
+            output::log(&format!(
+                "Total runtime: {}",
+                output::format_duration(duration)
+            ));
             output::log(&format!("Logs saved to: {}", logs_dir.display()));
             return Ok(());
         }
@@ -196,10 +220,19 @@ fn handle_failure(
         output::separator();
         let duration = start_time.elapsed();
         output::log(&format!("Total iterations: {iteration}"));
-        output::log(&format!("Total runtime: {}", output::format_duration(duration)));
+        output::log(&format!(
+            "Total runtime: {}",
+            output::format_duration(duration)
+        ));
         output::log(&format!("Logs saved to: {}", logs_dir.display()));
         if let Some(url) = webhook_url {
-            webhook::send_webhook(url, EventType::SessionFailed, &format!("Session failed after {iteration} iterations: too many consecutive failures"));
+            webhook::send_webhook(
+                url,
+                EventType::SessionFailed,
+                &format!(
+                    "Session failed after {iteration} iterations: too many consecutive failures"
+                ),
+            );
         }
         bail!("Too many consecutive failures");
     }

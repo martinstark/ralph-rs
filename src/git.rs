@@ -20,7 +20,13 @@ pub fn get_git_status() -> Option<GitStatus> {
 
 #[must_use]
 pub fn is_git_repo() -> bool {
+    is_git_repo_at(std::path::Path::new("."))
+}
+
+#[must_use]
+pub fn is_git_repo_at(path: &std::path::Path) -> bool {
     Command::new("git")
+        .current_dir(path)
         .args(["rev-parse", "--git-dir"])
         .output()
         .map(|o| o.status.success())
@@ -33,7 +39,9 @@ pub fn current_branch() -> Result<String> {
         .output()
         .context("Failed to get current branch")?;
 
-    Ok(parse_branch_output(&String::from_utf8_lossy(&output.stdout)))
+    Ok(parse_branch_output(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 pub(crate) fn parse_branch_output(output: &str) -> String {
@@ -46,7 +54,9 @@ pub fn uncommitted_changes_count() -> Result<usize> {
         .output()
         .context("Failed to get git status")?;
 
-    Ok(parse_porcelain_status(&String::from_utf8_lossy(&output.stdout)))
+    Ok(parse_porcelain_status(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 pub(crate) fn parse_porcelain_status(output: &str) -> usize {
