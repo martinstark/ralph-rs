@@ -33,9 +33,7 @@ pub fn run_init_phase(prd: &Prd, prd_path: &Path, progress_path: &Path) -> Resul
     if progress_path.exists() {
         let content = std::fs::read_to_string(progress_path).unwrap_or_default();
         let sessions = content.matches("## Session").count();
-        output::success(&format!(
-            "Progress: {sessions} previous sessions recorded"
-        ));
+        output::success(&format!("Progress: {sessions} previous sessions recorded"));
     } else {
         output::dim("Progress file will be created");
     }

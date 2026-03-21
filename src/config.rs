@@ -46,7 +46,7 @@ pub struct Args {
     pub completion_marker: Option<String>,
 
     /// Agent CLI to use
-    #[arg(long, value_enum, default_value_t = AgentCli::Codex)]
+    #[arg(long, value_enum, default_value_t = AgentCli::Claude)]
     pub agent: AgentCli,
 
     /// Claude permission mode: default, acceptEdits, plan
@@ -141,9 +141,9 @@ mod tests {
         }
 
         #[test]
-        fn agent_defaults_to_codex() {
+        fn agent_defaults_to_claude() {
             let args = parse_args(&[]);
-            assert_eq!(args.agent, AgentCli::Codex);
+            assert_eq!(args.agent, AgentCli::Claude);
         }
 
         #[test]

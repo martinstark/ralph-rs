@@ -44,10 +44,7 @@ pub fn send_webhook(url: &str, event: EventType, message: &str) {
                 output::dim(&format!("Webhook sent: {event_str}"));
             }
             Ok(resp) => {
-                output::warn(&format!(
-                    "Webhook returned {}: {event_str}",
-                    resp.status()
-                ));
+                output::warn(&format!("Webhook returned {}: {event_str}", resp.status()));
             }
             Err(e) => {
                 output::warn(&format!("Webhook failed: {e}"));

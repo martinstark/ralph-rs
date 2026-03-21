@@ -73,7 +73,9 @@ mod tests {
 
         #[test]
         fn detects_unable_to_continue() {
-            assert!(detect_loop_pattern("I'm unable to continue without more info"));
+            assert!(detect_loop_pattern(
+                "I'm unable to continue without more info"
+            ));
         }
 
         #[test]
@@ -83,7 +85,9 @@ mod tests {
 
         #[test]
         fn detects_cannot_complete() {
-            assert!(detect_loop_pattern("Cannot complete this task as requested"));
+            assert!(detect_loop_pattern(
+                "Cannot complete this task as requested"
+            ));
         }
 
         #[test]
@@ -225,7 +229,10 @@ mod tests {
 
         #[test]
         fn completion_marker_exact_match() {
-            let result = analyze_iteration_output("<promise>COMPLETE</promise>", &ctx(true, "<promise>COMPLETE</promise>"));
+            let result = analyze_iteration_output(
+                "<promise>COMPLETE</promise>",
+                &ctx(true, "<promise>COMPLETE</promise>"),
+            );
             assert_eq!(result, IterationResult::Complete);
         }
 

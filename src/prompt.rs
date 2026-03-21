@@ -73,7 +73,10 @@ pub fn substitute_placeholders(
 
     template
         .replace(PLACEHOLDER_PRD_PATH, &prd_path.display().to_string())
-        .replace(PLACEHOLDER_PROGRESS_PATH, &progress_path.display().to_string())
+        .replace(
+            PLACEHOLDER_PROGRESS_PATH,
+            &progress_path.display().to_string(),
+        )
         .replace(PLACEHOLDER_VERIFICATION_COMMANDS, &verification_commands)
         .replace(PLACEHOLDER_COMPLETION_MARKER, &prd.completion.marker)
 }
@@ -87,7 +90,12 @@ pub fn get_system_prompt(
     match prompt_path {
         Some(path) => {
             let template = load_custom_prompt(path)?;
-            Ok(substitute_placeholders(&template, prd, prd_path, progress_path))
+            Ok(substitute_placeholders(
+                &template,
+                prd,
+                prd_path,
+                progress_path,
+            ))
         }
         None => Ok(build_system_prompt(prd, prd_path, progress_path)),
     }
@@ -348,7 +356,9 @@ mod tests {
 
             let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
 
-            assert!(result.contains("- `cargo clippy -- -D warnings` - Lint with warnings as errors"));
+            assert!(
+                result.contains("- `cargo clippy -- -D warnings` - Lint with warnings as errors")
+            );
         }
 
         #[test]
@@ -379,7 +389,11 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("path with spaces/progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("path with spaces/progress.txt"),
+            );
 
             assert!(result.contains("path with spaces/progress.txt"));
         }
@@ -390,7 +404,11 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("/absolute/path/progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("/absolute/path/progress.txt"),
+            );
 
             assert!(result.contains("/absolute/path/progress.txt"));
         }
@@ -468,7 +486,8 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "Path: {prd_path}\nProgress: {progress_path}\nCommands:\n{verification_commands}\nMarker: {completion_marker}";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+            let result =
+                substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
 
             assert!(result.contains(&prd_file.path().display().to_string()));
             assert!(result.contains("progress.txt"));
@@ -483,7 +502,8 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "Only path: {prd_path} and marker: {completion_marker}";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("prog.txt"));
+            let result =
+                substitute_placeholders(template, &prd, prd_file.path(), Path::new("prog.txt"));
 
             assert!(result.contains(&prd_file.path().display().to_string()));
             assert!(result.contains("DONE"));
@@ -498,7 +518,8 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "Static content with no placeholders";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+            let result =
+                substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
 
             assert_eq!(result, "Static content with no placeholders");
         }
@@ -510,7 +531,8 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "{completion_marker} and again {completion_marker}";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+            let result =
+                substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
 
             assert_eq!(result, "MARKER and again MARKER");
         }
@@ -522,7 +544,8 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "Known: {completion_marker}, Unknown: {unknown_placeholder}";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+            let result =
+                substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
 
             assert!(result.contains("Known: DONE"));
             assert!(result.contains("{unknown_placeholder}"));
@@ -535,7 +558,8 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "Commands: {verification_commands}";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+            let result =
+                substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
 
             assert_eq!(result, "Commands: ");
         }
@@ -561,12 +585,12 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "{verification_commands}";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+            let result =
+                substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
 
             assert!(result.contains("- `cargo check` - Type check"));
             assert!(result.contains("- `cargo test` - Run tests"));
         }
-
     }
 
     mod get_system_prompt_tests {
@@ -585,7 +609,8 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = get_system_prompt(None, &prd, prd_file.path(), Path::new("progress.txt")).unwrap();
+            let result =
+                get_system_prompt(None, &prd, prd_file.path(), Path::new("progress.txt")).unwrap();
 
             assert!(result.contains("## Important Paths"));
             assert!(result.contains("## Rules"));
@@ -599,7 +624,11 @@ mod tests {
             write!(prd_file, "PRD content here").unwrap();
 
             let mut prompt_file = NamedTempFile::new().unwrap();
-            write!(prompt_file, "Custom prompt with {{prd_path}} and {{completion_marker}}").unwrap();
+            write!(
+                prompt_file,
+                "Custom prompt with {{prd_path}} and {{completion_marker}}"
+            )
+            .unwrap();
 
             let result = get_system_prompt(
                 Some(prompt_file.path()),
