@@ -50,6 +50,7 @@ pub async fn run(
         dangerously_skip_permissions: ctx.args.dangerously_skip_permissions,
         timeout_secs: ctx.args.timeout,
         project_dir: ctx.project_dir,
+        model: ctx.args.model.clone(),
     };
 
     let result = claude::run_claude(&system_prompt, &claude_args, &log_path, cancel_token).await?;

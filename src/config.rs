@@ -65,6 +65,10 @@ pub struct Args {
     /// Timeout per Claude execution in seconds
     #[arg(short = 't', long, default_value_t = 1800)]
     pub timeout: u64,
+
+    /// Model for Claude sessions (e.g. 'sonnet', 'opus', 'claude-sonnet-4-6')
+    #[arg(long)]
+    pub model: Option<String>,
 }
 
 #[cfg(test)]
@@ -160,6 +164,12 @@ mod tests {
         fn webhook_defaults_to_none() {
             let args = parse_args(&[]);
             assert!(args.webhook.is_none());
+        }
+
+        #[test]
+        fn model_defaults_to_none() {
+            let args = parse_args(&[]);
+            assert!(args.model.is_none());
         }
 
         #[test]
@@ -312,6 +322,12 @@ mod tests {
         fn max_iteration_errors_zero_disables() {
             let args = parse_args(&["--max-iteration-errors", "0"]);
             assert_eq!(args.max_iteration_errors, 0);
+        }
+
+        #[test]
+        fn model_long_flag() {
+            let args = parse_args(&["--model", "sonnet"]);
+            assert_eq!(args.model, Some("sonnet".to_string()));
         }
     }
 

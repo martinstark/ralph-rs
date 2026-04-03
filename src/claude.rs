@@ -13,6 +13,7 @@ pub struct ClaudeArgs<'a> {
     pub dangerously_skip_permissions: bool,
     pub timeout_secs: u64,
     pub project_dir: &'a std::path::Path,
+    pub model: Option<String>,
 }
 
 pub struct ClaudeResult {
@@ -38,6 +39,9 @@ pub async fn run_claude(
         cmd.arg("--continue");
     } else {
         cmd.arg("--print");
+    }
+    if let Some(ref model) = args.model {
+        cmd.arg("--model").arg(model);
     }
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());
