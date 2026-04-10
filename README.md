@@ -95,18 +95,21 @@ ralph                 # Run the loop
   ],
   "completion": {
     "allFeaturesComplete": true,
-    "allVerificationsPassing": true,
-    "marker": "<promise>COMPLETE</promise>"
+    "allVerificationsPassing": true
   }
 }
 ```
+
+Ralph uses a built-in completion marker of `<promise>COMPLETE</promise>`. Override it with `--completion-marker` when you need a different marker; it is no longer stored in the PRD.
+
+`runAfterEachFeature` only changes the instructions Ralph gives the agent. Ralph does not enforce per-feature verification execution during the normal loop; explicit modes like `--dry-run` are still where Rust runs verification commands itself.
 
 ## Options
 
 ```
 -p, --prd <PATH>                  PRD file path [default: prd.jsonc]
 -P, --prompt <PATH>               Custom system prompt file
--c, --completion-marker <TEXT>    Completion marker (overrides PRD)
+-c, --completion-marker <TEXT>    Completion marker (overrides built-in default)
 -m, --max-iterations <N>          Max iterations, 0=unlimited [default: 10]
 -d, --delay <SECONDS>             Delay between iterations [default: 2]
 -t, --timeout <SECONDS>           Claude timeout [default: 1800]
@@ -146,8 +149,10 @@ Custom prompts support these placeholders, replaced at runtime:
 | `{prd_path}` | Path to the PRD file |
 | `{progress_path}` | Path to the progress file |
 | `{verification_commands}` | Formatted list of verification commands |
-| `{completion_marker}` | Completion marker from PRD |
-| `{prd_content}` | Full contents of the PRD file |
+| `{completion_marker}` | Effective completion marker |
+| `{verification_rule}` | Verification policy sentence based on `runAfterEachFeature` |
+| `{verification_workflow}` | Workflow step for verification timing |
+| `{completion_workflow}` | Workflow step for when to mark a feature complete |
 
 ### Example use case
 

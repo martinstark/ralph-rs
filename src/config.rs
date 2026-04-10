@@ -1,5 +1,24 @@
+use anyhow::{bail, Result as AnyhowResult};
 use clap::Parser;
 use std::path::PathBuf;
+
+pub const DEFAULT_COMPLETION_MARKER: &str = "<promise>COMPLETE</promise>";
+
+fn parse_completion_marker(value: &str) -> std::result::Result<String, String> {
+    if value.is_empty() {
+        Err("completion marker cannot be empty".to_string())
+    } else {
+        Ok(value.to_string())
+    }
+}
+
+pub fn resolve_completion_marker(cli_override: Option<&str>) -> AnyhowResult<&str> {
+    match cli_override {
+        Some(marker) if marker.is_empty() => bail!("Completion marker cannot be empty"),
+        Some(marker) => Ok(marker),
+        None => Ok(DEFAULT_COMPLETION_MARKER),
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "ralph")]
@@ -22,8 +41,8 @@ pub struct Args {
     #[arg(short, long, default_value_t = 2)]
     pub delay: u64,
 
-    /// Completion marker text (overrides PRD)
-    #[arg(short, long)]
+    /// Completion marker text (overrides built-in default)
+    #[arg(short, long, value_parser = parse_completion_marker)]
     pub completion_marker: Option<String>,
 
     /// Claude permission mode: default, acceptEdits, plan
@@ -299,7 +318,10 @@ mod tests {
         #[test]
         fn webhook_long_flag() {
             let args = parse_args(&["--webhook", "https://example.com/webhook"]);
-            assert_eq!(args.webhook, Some("https://example.com/webhook".to_string()));
+            assert_eq!(
+                args.webhook,
+                Some("https://example.com/webhook".to_string())
+            );
         }
 
         #[test]
@@ -348,9 +370,9 @@ mod tests {
         }
 
         #[test]
-        fn completion_marker_empty_string() {
-            let args = parse_args(&["-c", ""]);
-            assert_eq!(args.completion_marker, Some(String::new()));
+        fn completion_marker_empty_string_is_rejected() {
+            let result = try_parse_args(&["-c", ""]);
+            assert!(result.is_err());
         }
 
         #[test]
@@ -438,13 +460,42 @@ mod tests {
         #[test]
         fn prompt_path_with_spaces() {
             let args = parse_args(&["-P", "path with spaces/prompt.md"]);
-            assert_eq!(args.prompt, Some(PathBuf::from("path with spaces/prompt.md")));
+            assert_eq!(
+                args.prompt,
+                Some(PathBuf::from("path with spaces/prompt.md"))
+            );
         }
 
         #[test]
         fn prompt_path_absolute() {
             let args = parse_args(&["-P", "/home/user/prompts/custom.md"]);
-            assert_eq!(args.prompt, Some(PathBuf::from("/home/user/prompts/custom.md")));
+            assert_eq!(
+                args.prompt,
+                Some(PathBuf::from("/home/user/prompts/custom.md"))
+            );
+        }
+    }
+
+    mod completion_marker_resolution {
+        use super::*;
+
+        #[test]
+        fn defaults_to_built_in_marker() {
+            assert_eq!(
+                resolve_completion_marker(None).unwrap(),
+                DEFAULT_COMPLETION_MARKER
+            );
+        }
+
+        #[test]
+        fn cli_override_takes_precedence() {
+            assert_eq!(resolve_completion_marker(Some("DONE")).unwrap(), "DONE");
+        }
+
+        #[test]
+        fn empty_override_is_rejected() {
+            let result = resolve_completion_marker(Some(""));
+            assert!(result.is_err());
         }
     }
 }

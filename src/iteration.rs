@@ -42,6 +42,7 @@ pub async fn run(
         ctx.prd,
         &ctx.args.prd,
         ctx.progress_path,
+        ctx.completion_marker,
     )?;
 
     let claude_args = ClaudeArgs {
