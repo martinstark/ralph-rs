@@ -7,6 +7,9 @@ pub const PLACEHOLDER_PRD_PATH: &str = "{prd_path}";
 pub const PLACEHOLDER_PROGRESS_PATH: &str = "{progress_path}";
 pub const PLACEHOLDER_VERIFICATION_COMMANDS: &str = "{verification_commands}";
 pub const PLACEHOLDER_COMPLETION_MARKER: &str = "{completion_marker}";
+pub const PLACEHOLDER_VERIFICATION_RULE: &str = "{verification_rule}";
+pub const PLACEHOLDER_VERIFICATION_WORKFLOW: &str = "{verification_workflow}";
+pub const PLACEHOLDER_COMPLETION_WORKFLOW: &str = "{completion_workflow}";
 
 const PROMPT_TEMPLATE: &str = r#"You are an autonomous coding agent working through features defined in a PRD.
 
@@ -20,7 +23,7 @@ const PROMPT_TEMPLATE: &str = r#"You are an autonomous coding agent working thro
 1. **ONE feature per session** - Focus on a single feature from the PRD
 2. **Status-only edits** - You may ONLY change the "status" field in {prd_path}
 3. **No test removal** - Never remove or weaken existing tests
-4. **Verify before complete** - Run all verification commands before marking complete
+4. **Verification cadence** - {verification_rule}
 5. **Commit per feature** - Commit changes with descriptive messages, include only files relevant to the feature
 
 ## Verification Commands
@@ -34,8 +37,8 @@ Run these commands to verify your changes:
 2. Find the first feature with status "pending" or "in-progress"
 3. If "pending", update status to "in-progress"
 4. Implement the feature following the defined steps
-5. Run verification commands
-6. If verification passes, update feature status to "complete"
+5. {verification_workflow}
+6. {completion_workflow}
 7. If blocked (unclear requirements, missing dependencies, repeated failures), update status to "blocked"
 8. Commit your changes with a descriptive message (only feature-related files)
 9. **ALWAYS** append to {progress_path} at the end of each loop, documenting:
@@ -68,14 +71,23 @@ pub fn substitute_placeholders(
     prd: &Prd,
     prd_path: &Path,
     progress_path: &Path,
+    completion_marker: &str,
 ) -> String {
     let verification_commands = format_verification_commands(prd);
+    let (verification_rule, verification_workflow, completion_workflow) =
+        verification_guidance(prd);
 
     template
         .replace(PLACEHOLDER_PRD_PATH, &prd_path.display().to_string())
-        .replace(PLACEHOLDER_PROGRESS_PATH, &progress_path.display().to_string())
+        .replace(
+            PLACEHOLDER_PROGRESS_PATH,
+            &progress_path.display().to_string(),
+        )
         .replace(PLACEHOLDER_VERIFICATION_COMMANDS, &verification_commands)
-        .replace(PLACEHOLDER_COMPLETION_MARKER, &prd.completion.marker)
+        .replace(PLACEHOLDER_COMPLETION_MARKER, completion_marker)
+        .replace(PLACEHOLDER_VERIFICATION_RULE, verification_rule)
+        .replace(PLACEHOLDER_VERIFICATION_WORKFLOW, verification_workflow)
+        .replace(PLACEHOLDER_COMPLETION_WORKFLOW, completion_workflow)
 }
 
 pub fn get_system_prompt(
@@ -83,13 +95,41 @@ pub fn get_system_prompt(
     prd: &Prd,
     prd_path: &Path,
     progress_path: &Path,
+    completion_marker: &str,
 ) -> Result<String> {
     match prompt_path {
         Some(path) => {
             let template = load_custom_prompt(path)?;
-            Ok(substitute_placeholders(&template, prd, prd_path, progress_path))
+            Ok(substitute_placeholders(
+                &template,
+                prd,
+                prd_path,
+                progress_path,
+                completion_marker,
+            ))
         }
-        None => Ok(build_system_prompt(prd, prd_path, progress_path)),
+        None => Ok(build_system_prompt(
+            prd,
+            prd_path,
+            progress_path,
+            completion_marker,
+        )),
+    }
+}
+
+fn verification_guidance(prd: &Prd) -> (&'static str, &'static str, &'static str) {
+    if prd.verification.run_after_each_feature {
+        (
+            "Run all verification commands before marking a feature complete",
+            "Run all verification commands for the feature",
+            "If verification passes, update feature status to \"complete\"",
+        )
+    } else {
+        (
+            "Verification after each feature is optional, but you must run all verification commands before final completion",
+            "Verification after each feature is optional. If you defer it, note that clearly in the progress log",
+            "If the feature is complete, update feature status to \"complete\"",
+        )
     }
 }
 
@@ -103,8 +143,19 @@ fn format_verification_commands(prd: &Prd) -> String {
 }
 
 #[must_use]
-pub fn build_system_prompt(prd: &Prd, prd_path: &Path, progress_path: &Path) -> String {
-    substitute_placeholders(PROMPT_TEMPLATE, prd, prd_path, progress_path)
+pub fn build_system_prompt(
+    prd: &Prd,
+    prd_path: &Path,
+    progress_path: &Path,
+    completion_marker: &str,
+) -> String {
+    substitute_placeholders(
+        PROMPT_TEMPLATE,
+        prd,
+        prd_path,
+        progress_path,
+        completion_marker,
+    )
 }
 
 #[cfg(test)]
@@ -114,7 +165,16 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
-    fn make_test_prd(commands: Vec<VerifyCommand>, marker: &str) -> Prd {
+    const DEFAULT_TEST_MARKER: &str = "DONE";
+
+    fn make_test_prd(commands: Vec<VerifyCommand>, _marker: &str) -> Prd {
+        make_test_prd_with_verification_mode(commands, true)
+    }
+
+    fn make_test_prd_with_verification_mode(
+        commands: Vec<VerifyCommand>,
+        run_after_each_feature: bool,
+    ) -> Prd {
         Prd {
             project: Project {
                 name: "test-project".into(),
@@ -123,7 +183,7 @@ mod tests {
             },
             verification: Verification {
                 commands,
-                run_after_each_feature: true,
+                run_after_each_feature,
             },
             features: vec![Feature {
                 id: "feat-1".into(),
@@ -136,7 +196,6 @@ mod tests {
             completion: Completion {
                 all_features_complete: true,
                 all_verifications_passing: true,
-                marker: marker.into(),
             },
         }
     }
@@ -150,7 +209,12 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("## Important Paths"));
             assert!(result.contains("**PRD file**"));
@@ -163,13 +227,18 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("## Rules"));
             assert!(result.contains("ONE feature per session"));
             assert!(result.contains("Status-only edits"));
             assert!(result.contains("No test removal"));
-            assert!(result.contains("Verify before complete"));
+            assert!(result.contains("Verification cadence"));
             assert!(result.contains("Commit per feature"));
         }
 
@@ -179,11 +248,16 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("## Workflow"));
             assert!(result.contains("Find the first feature"));
-            assert!(result.contains("Run verification commands"));
+            assert!(result.contains("verification"));
             assert!(result.contains("Commit your changes"));
             assert!(result.contains("**STOP**"));
         }
@@ -194,7 +268,12 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("## Completion"));
             assert!(result.contains("When ALL features have status"));
@@ -207,7 +286,12 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
             let prd_path = prd_file.path();
 
-            let result = build_system_prompt(&prd, prd_path, Path::new("progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_path,
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains(&prd_path.display().to_string()));
         }
@@ -218,7 +302,12 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("./my-progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("./my-progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("./my-progress.txt"));
         }
@@ -228,12 +317,17 @@ mod tests {
         use super::*;
 
         #[test]
-        fn includes_completion_marker_from_prd() {
+        fn includes_completion_marker_from_runtime_resolution() {
             let prd = make_test_prd(vec![], "<promise>COMPLETE</promise>");
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                "<promise>COMPLETE</promise>",
+            );
 
             assert!(result.contains("<promise>COMPLETE</promise>"));
         }
@@ -244,9 +338,58 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                "CUSTOM_MARKER_12345",
+            );
 
             assert!(result.contains("CUSTOM_MARKER_12345"));
+        }
+    }
+
+    mod verification_guidance_tests {
+        use super::*;
+
+        #[test]
+        fn requires_verification_before_feature_completion_when_enabled() {
+            let prd = make_test_prd_with_verification_mode(vec![], true);
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "{{}}").unwrap();
+
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
+
+            assert!(
+                result.contains("Run all verification commands before marking a feature complete")
+            );
+            assert!(
+                result.contains("If verification passes, update feature status to \"complete\"")
+            );
+        }
+
+        #[test]
+        fn allows_deferred_verification_when_disabled() {
+            let prd = make_test_prd_with_verification_mode(vec![], false);
+            let mut prd_file = NamedTempFile::new().unwrap();
+            write!(prd_file, "{{}}").unwrap();
+
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
+
+            assert!(result.contains("Verification after each feature is optional"));
+            assert!(result.contains("before final completion"));
+            assert!(result
+                .contains("If the feature is complete, update feature status to \"complete\""));
         }
     }
 
@@ -266,7 +409,12 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("## Verification Commands"));
         }
@@ -284,7 +432,12 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("- `cargo check` - Type checking"));
         }
@@ -314,7 +467,12 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("- `cargo check` - Type checking"));
             assert!(result.contains("- `cargo test` - Run tests"));
@@ -327,7 +485,12 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("## Verification Commands"));
             assert!(result.contains("Run these commands to verify"));
@@ -346,9 +509,16 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
-            assert!(result.contains("- `cargo clippy -- -D warnings` - Lint with warnings as errors"));
+            assert!(
+                result.contains("- `cargo clippy -- -D warnings` - Lint with warnings as errors")
+            );
         }
 
         #[test]
@@ -364,7 +534,12 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("- `wc -l src/*.rs | tail -1` - Count lines"));
         }
@@ -379,7 +554,12 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("path with spaces/progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("path with spaces/progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("path with spaces/progress.txt"));
         }
@@ -390,7 +570,12 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = build_system_prompt(&prd, prd_file.path(), Path::new("/absolute/path/progress.txt"));
+            let result = build_system_prompt(
+                &prd,
+                prd_file.path(),
+                Path::new("/absolute/path/progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("/absolute/path/progress.txt"));
         }
@@ -468,7 +653,13 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "Path: {prd_path}\nProgress: {progress_path}\nCommands:\n{verification_commands}\nMarker: {completion_marker}";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+            let result = substitute_placeholders(
+                template,
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                "COMPLETE",
+            );
 
             assert!(result.contains(&prd_file.path().display().to_string()));
             assert!(result.contains("progress.txt"));
@@ -483,7 +674,13 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "Only path: {prd_path} and marker: {completion_marker}";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("prog.txt"));
+            let result = substitute_placeholders(
+                template,
+                &prd,
+                prd_file.path(),
+                Path::new("prog.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains(&prd_file.path().display().to_string()));
             assert!(result.contains("DONE"));
@@ -498,7 +695,13 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "Static content with no placeholders";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+            let result = substitute_placeholders(
+                template,
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert_eq!(result, "Static content with no placeholders");
         }
@@ -510,7 +713,13 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "{completion_marker} and again {completion_marker}";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+            let result = substitute_placeholders(
+                template,
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                "MARKER",
+            );
 
             assert_eq!(result, "MARKER and again MARKER");
         }
@@ -522,7 +731,13 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "Known: {completion_marker}, Unknown: {unknown_placeholder}";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+            let result = substitute_placeholders(
+                template,
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("Known: DONE"));
             assert!(result.contains("{unknown_placeholder}"));
@@ -535,7 +750,13 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "Commands: {verification_commands}";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+            let result = substitute_placeholders(
+                template,
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert_eq!(result, "Commands: ");
         }
@@ -561,12 +782,17 @@ mod tests {
             write!(prd_file, "{{}}").unwrap();
 
             let template = "{verification_commands}";
-            let result = substitute_placeholders(template, &prd, prd_file.path(), Path::new("progress.txt"));
+            let result = substitute_placeholders(
+                template,
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
+            );
 
             assert!(result.contains("- `cargo check` - Type check"));
             assert!(result.contains("- `cargo test` - Run tests"));
         }
-
     }
 
     mod get_system_prompt_tests {
@@ -585,7 +811,14 @@ mod tests {
             let mut prd_file = NamedTempFile::new().unwrap();
             write!(prd_file, "{{}}").unwrap();
 
-            let result = get_system_prompt(None, &prd, prd_file.path(), Path::new("progress.txt")).unwrap();
+            let result = get_system_prompt(
+                None,
+                &prd,
+                prd_file.path(),
+                Path::new("progress.txt"),
+                "COMPLETE",
+            )
+            .unwrap();
 
             assert!(result.contains("## Important Paths"));
             assert!(result.contains("## Rules"));
@@ -599,13 +832,18 @@ mod tests {
             write!(prd_file, "PRD content here").unwrap();
 
             let mut prompt_file = NamedTempFile::new().unwrap();
-            write!(prompt_file, "Custom prompt with {{prd_path}} and {{completion_marker}}").unwrap();
+            write!(
+                prompt_file,
+                "Custom prompt with {{prd_path}} and {{completion_marker}}"
+            )
+            .unwrap();
 
             let result = get_system_prompt(
                 Some(prompt_file.path()),
                 &prd,
                 prd_file.path(),
                 Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
             )
             .unwrap();
 
@@ -640,6 +878,7 @@ mod tests {
                 &prd,
                 prd_file.path(),
                 Path::new("prog.txt"),
+                "MARKER",
             )
             .unwrap();
 
@@ -660,6 +899,7 @@ mod tests {
                 &prd,
                 prd_file.path(),
                 Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
             );
 
             assert!(result.is_err());
@@ -680,6 +920,7 @@ mod tests {
                 &prd,
                 prd_file.path(),
                 Path::new("progress.txt"),
+                DEFAULT_TEST_MARKER,
             )
             .unwrap();
 
@@ -714,6 +955,9 @@ mod tests {
             assert!(content.contains("{progress_path}"));
             assert!(content.contains("{verification_commands}"));
             assert!(content.contains("{completion_marker}"));
+            assert!(content.contains("{verification_rule}"));
+            assert!(content.contains("{verification_workflow}"));
+            assert!(content.contains("{completion_workflow}"));
         }
 
         #[test]

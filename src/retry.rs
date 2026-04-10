@@ -282,7 +282,7 @@ mod tests {
                     { "id": "feat-1", "category": "functional", "description": "d", "steps": [], "status": "complete" },
                     { "id": "feat-2", "category": "functional", "description": "d", "steps": [], "status": "in-progress" }
                 ],
-                "completion": { "allFeaturesComplete": true, "allVerificationsPassing": true, "marker": "X" }
+                "completion": { "allFeaturesComplete": true, "allVerificationsPassing": true }
             }"#,
             );
 
@@ -299,7 +299,7 @@ mod tests {
                     { "id": "feat-1", "category": "functional", "description": "d", "steps": [], "status": "complete" },
                     { "id": "feat-2", "category": "functional", "description": "d", "steps": [], "status": "pending" }
                 ],
-                "completion": { "allFeaturesComplete": true, "allVerificationsPassing": true, "marker": "X" }
+                "completion": { "allFeaturesComplete": true, "allVerificationsPassing": true }
             }"#,
             );
 

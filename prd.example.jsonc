@@ -5,7 +5,7 @@
   // RULES FOR THE AGENT:
   // 1. Work on ONE feature per session
   // 2. You may ONLY update the "status" field of features
-  // 3. Run verification tests before marking any feature complete
+  // 3. Use "runAfterEachFeature" to tell the agent when to run verification
   // 4. Commit changes with descriptive messages
 
   "project": {
@@ -51,7 +51,6 @@
 
   "completion": {
     "allFeaturesComplete": false,
-    "allVerificationsPassing": false,
-    "marker": "<promise>COMPLETE</promise>"
+    "allVerificationsPassing": false
   }
 }

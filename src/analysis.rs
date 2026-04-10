@@ -20,7 +20,7 @@ pub fn analyze_iteration_output(output: &str, ctx: &OutputAnalysisContext<'_>) -
     if detect_loop_pattern(output) {
         return IterationResult::LoopDetected;
     }
-    if output.contains(ctx.completion_marker) {
+    if !ctx.completion_marker.is_empty() && output.contains(ctx.completion_marker) {
         return IterationResult::Complete;
     }
     if ctx.success {
@@ -73,7 +73,9 @@ mod tests {
 
         #[test]
         fn detects_unable_to_continue() {
-            assert!(detect_loop_pattern("I'm unable to continue without more info"));
+            assert!(detect_loop_pattern(
+                "I'm unable to continue without more info"
+            ));
         }
 
         #[test]
@@ -83,7 +85,9 @@ mod tests {
 
         #[test]
         fn detects_cannot_complete() {
-            assert!(detect_loop_pattern("Cannot complete this task as requested"));
+            assert!(detect_loop_pattern(
+                "Cannot complete this task as requested"
+            ));
         }
 
         #[test]
@@ -225,14 +229,17 @@ mod tests {
 
         #[test]
         fn completion_marker_exact_match() {
-            let result = analyze_iteration_output("<promise>COMPLETE</promise>", &ctx(true, "<promise>COMPLETE</promise>"));
+            let result = analyze_iteration_output(
+                "<promise>COMPLETE</promise>",
+                &ctx(true, "<promise>COMPLETE</promise>"),
+            );
             assert_eq!(result, IterationResult::Complete);
         }
 
         #[test]
-        fn empty_marker_always_matches() {
+        fn empty_marker_does_not_match() {
             let result = analyze_iteration_output("any output", &ctx(true, ""));
-            assert_eq!(result, IterationResult::Complete);
+            assert_eq!(result, IterationResult::Continue);
         }
     }
 
