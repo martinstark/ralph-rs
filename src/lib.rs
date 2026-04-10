@@ -8,6 +8,7 @@ pub mod iteration;
 pub mod output;
 pub mod prd;
 pub mod prompt;
+pub mod rate_limit;
 pub mod retry;
 pub mod runner;
 pub mod validation;

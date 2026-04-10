@@ -1,8 +1,11 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use crate::rate_limit::{self, RateLimitInfo};
+use chrono::{DateTime, Utc};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IterationResult {
     Continue,
     Complete,
-    RateLimit,
+    RateLimit(RateLimitInfo),
     LoopDetected,
     Failed,
 }
@@ -10,12 +13,15 @@ pub enum IterationResult {
 pub struct OutputAnalysisContext<'a> {
     pub success: bool,
     pub completion_marker: &'a str,
+    pub observed_at: DateTime<Utc>,
 }
 
 #[must_use]
 pub fn analyze_iteration_output(output: &str, ctx: &OutputAnalysisContext<'_>) -> IterationResult {
-    if !ctx.success && detect_rate_limit(output) {
-        return IterationResult::RateLimit;
+    if !ctx.success {
+        if let Some(info) = rate_limit::parse_rate_limit_info(output, ctx.observed_at) {
+            return IterationResult::RateLimit(info);
+        }
     }
     if detect_loop_pattern(output) {
         return IterationResult::LoopDetected;
@@ -48,15 +54,7 @@ pub fn detect_loop_pattern(output: &str) -> bool {
 
 #[must_use]
 pub fn detect_rate_limit(output: &str) -> bool {
-    // Check last 1000 chars where error messages appear
-    let tail = output
-        .char_indices()
-        .rev()
-        .nth(999)
-        .map_or(output, |(i, _)| &output[i..]);
-    let lower = tail.to_lowercase();
-
-    lower.contains("rate limit") || lower.contains("too many requests")
+    rate_limit::detect_rate_limit(output)
 }
 
 #[cfg(test)]
@@ -175,18 +173,24 @@ mod tests {
 
     mod analyze_iteration_output_tests {
         use super::*;
+        use chrono::TimeZone;
+
+        fn observed_at() -> DateTime<Utc> {
+            Utc.with_ymd_and_hms(2026, 4, 10, 0, 0, 0).single().unwrap()
+        }
 
         fn ctx(success: bool, marker: &str) -> OutputAnalysisContext<'_> {
             OutputAnalysisContext {
                 success,
                 completion_marker: marker,
+                observed_at: observed_at(),
             }
         }
 
         #[test]
         fn returns_rate_limit_on_failure_with_rate_limit() {
             let result = analyze_iteration_output("Error: rate limit", &ctx(false, "DONE"));
-            assert_eq!(result, IterationResult::RateLimit);
+            assert!(matches!(result, IterationResult::RateLimit(_)));
         }
 
         #[test]
@@ -217,7 +221,7 @@ mod tests {
         fn rate_limit_takes_priority_over_loop_detection() {
             let output = "I cannot proceed\nrate limit";
             let result = analyze_iteration_output(output, &ctx(false, "DONE"));
-            assert_eq!(result, IterationResult::RateLimit);
+            assert!(matches!(result, IterationResult::RateLimit(_)));
         }
 
         #[test]

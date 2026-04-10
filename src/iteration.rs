@@ -5,7 +5,7 @@ use crate::{
     git, output, prd, prompt, validation,
 };
 use anyhow::Result;
-use chrono::Local;
+use chrono::{Local, Utc};
 use std::path::Path;
 use tokio_util::sync::CancellationToken;
 
@@ -73,6 +73,7 @@ pub async fn run(
     let analysis_ctx = OutputAnalysisContext {
         success: result.success,
         completion_marker: ctx.completion_marker,
+        observed_at: Utc::now(),
     };
     Ok(analyze_iteration_output(&result.output, &analysis_ctx))
 }
