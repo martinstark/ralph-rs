@@ -1,3 +1,7 @@
+use crate::rate_limit::{
+    DEFAULT_FALLBACK_SECONDS, DEFAULT_POST_RESET_MAX_BACKOFF_SECONDS,
+    DEFAULT_POST_RESET_MAX_RETRIES, DEFAULT_RESET_BUFFER_SECONDS,
+};
 use anyhow::{bail, Result as AnyhowResult};
 use clap::Parser;
 use std::path::PathBuf;
@@ -80,6 +84,25 @@ pub struct Args {
     /// Experimental: auto-block feature after N iteration errors (0 = disabled)
     #[arg(long, default_value_t = 0)]
     pub max_iteration_errors: u32,
+
+    /// Fallback cooldown for rate-limit retries when no reset time is available
+    #[arg(long, default_value_t = DEFAULT_FALLBACK_SECONDS)]
+    pub rate_limit_fallback_seconds: u64,
+
+    /// Safety buffer added after parsed rate-limit reset times
+    #[arg(long, default_value_t = DEFAULT_RESET_BUFFER_SECONDS)]
+    pub rate_limit_buffer_seconds: u64,
+
+    /// Maximum cooldown used for post-reset rate-limit backoff
+    #[arg(
+        long,
+        default_value_t = DEFAULT_POST_RESET_MAX_BACKOFF_SECONDS
+    )]
+    pub rate_limit_post_reset_max_backoff_seconds: u64,
+
+    /// Abort after this many consecutive post-reset rate-limit failures (0 = disabled)
+    #[arg(long, default_value_t = DEFAULT_POST_RESET_MAX_RETRIES)]
+    pub rate_limit_post_reset_max_retries: u32,
 
     /// Timeout per Claude execution in seconds
     #[arg(short = 't', long, default_value_t = 1800)]
@@ -185,6 +208,36 @@ mod tests {
         fn max_iteration_errors_defaults_to_0() {
             let args = parse_args(&[]);
             assert_eq!(args.max_iteration_errors, 0);
+        }
+
+        #[test]
+        fn rate_limit_fallback_seconds_defaults_to_60() {
+            let args = parse_args(&[]);
+            assert_eq!(args.rate_limit_fallback_seconds, DEFAULT_FALLBACK_SECONDS);
+        }
+
+        #[test]
+        fn rate_limit_buffer_seconds_defaults_to_60() {
+            let args = parse_args(&[]);
+            assert_eq!(args.rate_limit_buffer_seconds, DEFAULT_RESET_BUFFER_SECONDS);
+        }
+
+        #[test]
+        fn rate_limit_post_reset_max_backoff_seconds_defaults_to_1800() {
+            let args = parse_args(&[]);
+            assert_eq!(
+                args.rate_limit_post_reset_max_backoff_seconds,
+                DEFAULT_POST_RESET_MAX_BACKOFF_SECONDS
+            );
+        }
+
+        #[test]
+        fn rate_limit_post_reset_max_retries_defaults_to_4() {
+            let args = parse_args(&[]);
+            assert_eq!(
+                args.rate_limit_post_reset_max_retries,
+                DEFAULT_POST_RESET_MAX_RETRIES
+            );
         }
     }
 
@@ -334,6 +387,30 @@ mod tests {
         fn max_iteration_errors_zero_disables() {
             let args = parse_args(&["--max-iteration-errors", "0"]);
             assert_eq!(args.max_iteration_errors, 0);
+        }
+
+        #[test]
+        fn rate_limit_fallback_seconds_override() {
+            let args = parse_args(&["--rate-limit-fallback-seconds", "120"]);
+            assert_eq!(args.rate_limit_fallback_seconds, 120);
+        }
+
+        #[test]
+        fn rate_limit_buffer_seconds_override() {
+            let args = parse_args(&["--rate-limit-buffer-seconds", "90"]);
+            assert_eq!(args.rate_limit_buffer_seconds, 90);
+        }
+
+        #[test]
+        fn rate_limit_post_reset_max_backoff_seconds_override() {
+            let args = parse_args(&["--rate-limit-post-reset-max-backoff-seconds", "600"]);
+            assert_eq!(args.rate_limit_post_reset_max_backoff_seconds, 600);
+        }
+
+        #[test]
+        fn rate_limit_post_reset_max_retries_override() {
+            let args = parse_args(&["--rate-limit-post-reset-max-retries", "6"]);
+            assert_eq!(args.rate_limit_post_reset_max_retries, 6);
         }
     }
 

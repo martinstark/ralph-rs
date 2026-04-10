@@ -8,10 +8,13 @@ use crate::{
     config::{self, Args},
     dry_run, init,
     iteration::{self, IterationContext},
-    output, prd, retry,
+    output, prd,
+    rate_limit::{self, RateLimitInfo, RetryDecision, RetryPolicy, RetryReason},
+    retry,
     webhook::{self, EventType},
 };
 use anyhow::{bail, Context, Result};
+use chrono::{Local, Utc};
 use tokio::signal;
 use tokio::time::{sleep, Duration};
 use tokio_util::sync::CancellationToken;
@@ -93,9 +96,16 @@ pub async fn run(args: Args) -> Result<()> {
     let mut iteration: u32 = 0;
     let mut consecutive_failures: u32 = 0;
     let mut error_tracker = retry::IterationErrorTracker::new(args.max_iteration_errors);
+    let mut rate_limit_state = rate_limit::RateLimitState::default();
+    let rate_limit_policy = RetryPolicy {
+        fallback_seconds: args.rate_limit_fallback_seconds,
+        reset_buffer_seconds: args.rate_limit_buffer_seconds,
+        post_reset_max_backoff_seconds: args.rate_limit_post_reset_max_backoff_seconds,
+        post_reset_max_retries: args.rate_limit_post_reset_max_retries,
+    };
 
     loop {
-        iteration += 1;
+        let current_iteration = iteration + 1;
 
         let current_prd = prd::Prd::load(&args.prd)?;
 
@@ -112,6 +122,9 @@ pub async fn run(args: Args) -> Result<()> {
             prompt_path: args.prompt.as_deref(),
         };
 
+        let mut skip_normal_delay = false;
+        let mut count_iteration = true;
+
         tokio::select! {
             _ = signal::ctrl_c() => {
                 cancel_token_clone.cancel();
@@ -121,45 +134,63 @@ pub async fn run(args: Args) -> Result<()> {
                 output::log(&format!("Total runtime: {}", output::format_duration(duration)));
                 return Ok(());
             }
-            result = iteration::run(iteration, &ctx, &cancel_token) => {
+            result = iteration::run(current_iteration, &ctx, &cancel_token) => {
                 match result {
                     Ok(IterationResult::Continue) => {
                         consecutive_failures = 0;
+                        rate_limit_state.clear();
                     }
                     Ok(IterationResult::Complete) => {
+                        rate_limit_state.clear();
                         println!();
                         output::separator();
                         output::success("Completion marker found! Ralph loop finished.");
                         output::separator();
                         let duration = start_time.elapsed();
-                        output::log(&format!("Total iterations: {iteration}"));
+                        output::log(&format!("Total iterations: {current_iteration}"));
                         output::log(&format!("Total runtime: {}", output::format_duration(duration)));
                         output::log(&format!("Logs saved to: {}", logs_dir.display()));
                         if let Some(ref url) = args.webhook {
-                            webhook::send_webhook(url, EventType::SessionComplete, &format!("Session complete after {iteration} iterations"));
+                            webhook::send_webhook(url, EventType::SessionComplete, &format!("Session complete after {current_iteration} iterations"));
                         }
                         return Ok(());
                     }
-                    Ok(IterationResult::RateLimit) => {
-                        output::error("Rate limit detected. Waiting 60s before retry...");
-                        sleep(Duration::from_secs(60)).await;
+                    Ok(IterationResult::RateLimit(info)) => {
+                        count_iteration = false;
+                        skip_normal_delay = true;
+                        handle_rate_limit(
+                            &info,
+                            &mut rate_limit_state,
+                            &rate_limit_policy,
+                            current_iteration,
+                            start_time,
+                            &logs_dir,
+                            args.webhook.as_deref(),
+                        ).await?;
                     }
                     Ok(IterationResult::LoopDetected) => {
+                        rate_limit_state.clear();
                         output::warn("Loop detection: Agent appears blocked");
                         handle_iteration_error(&mut error_tracker, &args.prd, &current_prd)?;
-                        handle_failure(&mut consecutive_failures, iteration, start_time, &logs_dir, args.webhook.as_deref())?;
+                        handle_failure(&mut consecutive_failures, current_iteration, start_time, &logs_dir, args.webhook.as_deref())?;
                     }
                     Ok(IterationResult::Failed) => {
+                        rate_limit_state.clear();
                         handle_iteration_error(&mut error_tracker, &args.prd, &current_prd)?;
-                        handle_failure(&mut consecutive_failures, iteration, start_time, &logs_dir, args.webhook.as_deref())?;
+                        handle_failure(&mut consecutive_failures, current_iteration, start_time, &logs_dir, args.webhook.as_deref())?;
                     }
                     Err(e) => {
+                        rate_limit_state.clear();
                         output::error(&format!("Iteration error: {e:#}"));
                         handle_iteration_error(&mut error_tracker, &args.prd, &current_prd)?;
-                        handle_failure(&mut consecutive_failures, iteration, start_time, &logs_dir, args.webhook.as_deref())?;
+                        handle_failure(&mut consecutive_failures, current_iteration, start_time, &logs_dir, args.webhook.as_deref())?;
                     }
                 }
             }
+        }
+
+        if count_iteration {
+            iteration += 1;
         }
 
         if args.max_iterations > 0 && iteration >= args.max_iterations {
@@ -172,6 +203,11 @@ pub async fn run(args: Args) -> Result<()> {
             ));
             output::log(&format!("Logs saved to: {}", logs_dir.display()));
             return Ok(());
+        }
+
+        if skip_normal_delay {
+            println!();
+            continue;
         }
 
         println!();
@@ -240,4 +276,88 @@ fn handle_iteration_error(
     }
 
     Ok(())
+}
+
+async fn handle_rate_limit(
+    info: &RateLimitInfo,
+    state: &mut rate_limit::RateLimitState,
+    policy: &RetryPolicy,
+    iteration: u32,
+    start_time: std::time::Instant,
+    logs_dir: &std::path::Path,
+    webhook_url: Option<&str>,
+) -> Result<()> {
+    output::error(&format!("Rate limit detected: {}", info.raw_message));
+
+    match rate_limit::plan_retry(info, state, policy) {
+        RetryDecision::Wait(wait) => {
+            match wait.reason {
+                RetryReason::ParsedReset => output::warn(&format!(
+                    "Parsed reset time. Waiting {} until {} before retry...",
+                    output::format_duration(wait.duration),
+                    format_retry_deadline(wait.retry_at)
+                )),
+                RetryReason::ExistingReset => output::warn(&format!(
+                    "Rate limit reset already known. Waiting {} until {} before retry...",
+                    output::format_duration(wait.duration),
+                    format_retry_deadline(wait.retry_at)
+                )),
+                RetryReason::Fallback => output::warn(&format!(
+                    "No reset time parsed. Waiting {} before retry...",
+                    output::format_duration(wait.duration)
+                )),
+                RetryReason::PostResetBackoff => output::warn(&format!(
+                    "Still rate-limited after the expected reset. Backing off {} before retry (post-reset failure #{})...",
+                    output::format_duration(wait.duration),
+                    wait.post_reset_failures
+                )),
+            }
+            sleep(wait.duration).await;
+            Ok(())
+        }
+        RetryDecision::Abort(abort) => {
+            println!();
+            output::separator();
+            output::error("Rate limit persisted after the expected reset window.");
+            if let Some(active_reset_at) = abort.active_reset_at {
+                output::error(&format!(
+                    "Original reset target: {}",
+                    format_retry_deadline(
+                        active_reset_at
+                            + chrono::Duration::seconds(policy.reset_buffer_seconds as i64)
+                    )
+                ));
+            }
+            output::error(&format!(
+                "Post-reset retries attempted: {}",
+                abort.post_reset_failures
+            ));
+            output::error(&format!("Last rate-limit message: {}", abort.last_message));
+            output::separator();
+            let duration = start_time.elapsed();
+            output::log(&format!("Total iterations: {iteration}"));
+            output::log(&format!(
+                "Total runtime: {}",
+                output::format_duration(duration)
+            ));
+            output::log(&format!("Logs saved to: {}", logs_dir.display()));
+            if let Some(url) = webhook_url {
+                webhook::send_webhook(
+                    url,
+                    EventType::SessionFailed,
+                    &format!(
+                        "Session failed after {iteration} iterations: persistent post-reset rate limiting"
+                    ),
+                );
+            }
+            bail!("Persistent post-reset rate limiting");
+        }
+    }
+}
+
+fn format_retry_deadline(retry_at: chrono::DateTime<Utc>) -> String {
+    retry_at
+        .with_timezone(&Local)
+        .format("%Y-%m-%d %H:%M:%S %Z")
+        .to_string()
 }

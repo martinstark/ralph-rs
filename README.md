@@ -119,6 +119,12 @@ Ralph uses a built-in completion marker of `<promise>COMPLETE</promise>`. Overri
 --dry-run                         Validate PRD, run verifications, exit without Claude
 --webhook <URL>                   Webhook URL for session event notifications
 --max-iteration-errors <N>        Auto-block feature after N errors [default: 0] (experimental)
+--rate-limit-fallback-seconds <N> Fallback rate-limit cooldown [default: 60]
+--rate-limit-buffer-seconds <N>   Safety buffer after parsed reset times [default: 60]
+--rate-limit-post-reset-max-backoff-seconds <N>
+                                  Cap for post-reset backoff [default: 1800]
+--rate-limit-post-reset-max-retries <N>
+                                  Abort after N post-reset retries [default: 4]
 --dangerously-skip-permissions    Auto-approve all Claude actions
 --init-prompt                     Generate prompt.md template and exit
 ```
@@ -206,7 +212,7 @@ ralph --webhook https://example.com/webhook
 - **Validation** — Only PRD status field changes allowed per iteration
 - **Failure limit** — Exits after 3 consecutive failures
 - **Loop detection** — Detects stuck patterns and reports
-- **Rate limiting** — Auto-retries after 60s cooldown
+- **Rate limiting** — Parses Claude reset messages, waits until reset plus buffer, and uses post-reset backoff to avoid thrashing
 - **Ctrl+C** — Graceful shutdown with progress logged
 
 ## License
