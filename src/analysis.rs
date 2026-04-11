@@ -6,6 +6,7 @@ pub enum IterationResult {
     Continue,
     Complete,
     RateLimit(RateLimitInfo),
+    Cancelled,
     LoopDetected,
     Failed,
 }

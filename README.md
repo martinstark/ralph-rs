@@ -213,7 +213,16 @@ ralph --webhook https://example.com/webhook
 - **Failure limit** — Exits after 3 consecutive failures
 - **Loop detection** — Detects stuck patterns and reports
 - **Rate limiting** — Parses Claude reset messages, waits until reset plus buffer, and uses post-reset backoff to avoid thrashing
-- **Ctrl+C** — Graceful shutdown with progress logged
+- **Ctrl+C** — First `Ctrl+C` requests graceful shutdown and Ralph exits with code `130` after cleanup; second `Ctrl+C` forces an immediate exit
+
+## Interrupt Behavior
+
+- The first `Ctrl+C` cancels the current run, waits for the active Claude invocation or sleep to finish cleaning up, then exits with status `130`.
+- On Unix, Ralph starts Claude in a separate process group and interrupts Claude's process group before escalating to a force kill if it does not exit quickly.
+- Processes that deliberately move themselves into a different session or process group are outside that cleanup model.
+- On non-Unix platforms, Ralph falls back to terminating the direct Claude child process.
+- Rate-limit waits, inter-iteration delays, initialization git commands, and `--dry-run` verification commands are cancellation-aware.
+- Short local filesystem work and small synchronous git checks in validation paths are still best-effort rather than fully cancellable.
 
 ## License
 
