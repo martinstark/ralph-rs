@@ -1,8 +1,15 @@
 # ralph
 
-Autonomous AI agent loop for Claude Code CLI. Iteratively works through features defined in a PRD until completion.
+`ralph` is a CLI loop that runs Claude Code against a PRD (`prd.jsonc`) until the agent reports completion.
 
-Implemented in Rust, based on a ralph shell script that I've used to educate teams and deploy code to production.
+Each iteration Ralph:
+
+- builds a system prompt from the PRD
+- invokes `claude`
+- analyzes output for completion, rate limits, and stuck-loop patterns
+- writes a per-iteration log to `.ralph/logs/`
+
+Git is optional, but recommended. In Git repos Ralph validates that PRD edits only change feature `status` fields.
 
 ## Install
 
@@ -18,56 +25,44 @@ paru -S ralph
 cargo install --path .
 ```
 
-Requires [Claude CLI](https://github.com/anthropics/claude-code) in PATH.
+Requirements:
+
+- [`claude`](https://github.com/anthropics/claude-code) must be in `PATH`
+- Git is recommended if you want PRD diff validation and init-phase git context
 
 ## Quick Start
 
 ```bash
 cd <project>
-ralph --init          # Create template prd.jsonc
-# Edit prd.jsonc with your features
-ralph                 # Run the loop
-
-# sandboxing and using --dangerously-skip-permissions
-# is recommended to avoid getting stuck on approval
+ralph --init       # creates prd.jsonc
+$EDITOR prd.jsonc  # edit the generated template
+ralph --dry-run    # validate PRD and run verification commands
+ralph              # start the loop
 ```
 
-## Usage
+## Files
 
-1. **Generate template** — In your project directory, run:
-   ```bash
-   ralph --init
-   ```
-   This creates a `prd.jsonc` file with the basic structure.
+These files live next to the PRD. If you use `--prd path/to/custom.jsonc`, Ralph uses that directory instead of the current one.
 
-2. **Populate the PRD** — The template needs to be filled with features for ralph to process. Start a Claude session and ask it to break down your task:
-   ```bash
-   claude
-   ```
-   Then prompt:
-   ```
-   Evaluate [YOUR TASK HERE] and break it down into implementation steps.
-   Output the result in prd.jsonc format with features array containing
-   id, category, description, steps, and status fields.
-   ```
+| Path | Purpose |
+|------|---------|
+| `prd.jsonc` | Task definition and verification commands |
+| `progress.txt` | Append-only progress log used by the built-in prompt |
+| `.ralph/logs/` | One log file per Claude iteration |
 
-3. **Copy the output** — Replace the template content in `prd.jsonc` with Claude's structured breakdown.
+## Workflow
 
-4. **Run the loop** — Exit Claude and start ralph:
-   ```bash
-   ralph
-   ```
-   Ralph will iterate through each feature, spawning Claude sessions to implement them one by one until all are complete.
+1. Load the PRD and resolve the effective completion marker.
+2. Create `progress.txt` and `.ralph/logs/` if needed.
+3. Run the optional init phase: git status, PRD summary, progress summary, recent commits.
+4. Invoke `claude` with the built-in prompt or a custom prompt.
+5. Classify the result as `continue`, `complete`, `rate-limit`, `loop-detected`, `failed`, or `cancelled`.
+6. In Git repos, validate that PRD changes only touched `status`.
+7. Stop on completion marker, interruption, max iterations, or repeated failures.
 
-## How It Works
+Completion is marker-based. By default Ralph finishes when Claude outputs `<promise>COMPLETE</promise>`. Override it with `--completion-marker`.
 
-1. **Initialize** — Validates PRD, checks git status, shows feature summary
-2. **Loop** — For each iteration:
-   - Spawns Claude with PRD context
-   - Claude implements one pending feature
-   - Validates only status field was modified
-   - Commits changes, updates progress
-   - Repeats until all features complete
+The built-in prompt tells the agent to append to `progress.txt` and commit its work. Ralph does not enforce either action itself.
 
 ## PRD Format
 
@@ -75,22 +70,32 @@ ralph                 # Run the loop
 {
   "project": {
     "name": "my-project",
-    "description": "What this project does"
+    "description": "What this project does",
+    "repository": "https://github.com/example/my-project"
   },
   "verification": {
     "commands": [
-      { "name": "check", "command": "cargo check" },
-      { "name": "test", "command": "cargo test" }
+      {
+        "name": "check",
+        "command": "cargo check",
+        "description": "Compile / type-check"
+      },
+      {
+        "name": "test",
+        "command": "cargo test",
+        "description": "Run the test suite"
+      }
     ],
     "runAfterEachFeature": true
   },
   "features": [
     {
       "id": "feature-id",
-      "category": "functional",  // functional|bugfix|refactor|test|docs
+      "category": "functional",
       "description": "What needs to be done",
       "steps": ["Step 1", "Step 2"],
-      "status": "pending"        // pending|in-progress|complete|blocked
+      "status": "pending",
+      "notes": "Optional context"
     }
   ],
   "completion": {
@@ -100,98 +105,83 @@ ralph                 # Run the loop
 }
 ```
 
-Ralph uses a built-in completion marker of `<promise>COMPLETE</promise>`. Override it with `--completion-marker` when you need a different marker; it is no longer stored in the PRD.
+Notes:
 
-`runAfterEachFeature` only changes the instructions Ralph gives the agent. Ralph does not enforce per-feature verification execution during the normal loop; explicit modes like `--dry-run` are still where Rust runs verification commands itself.
+- `status` must be one of `pending`, `in-progress`, `complete`, or `blocked`.
+- `category` is free-form. Common values are `functional`, `bugfix`, `refactor`, `test`, and `docs`.
+- `project.repository` and `features[].notes` are optional.
+- `verification.commands[].description` is required.
+- `runAfterEachFeature` only changes the instructions Ralph gives the agent. Ralph itself runs verification commands in `--dry-run`; during normal runs the agent is instructed to run them.
+- `completion` is part of the required schema, but the Rust loop stops on the completion marker in Claude output, not on those boolean fields.
+- Use `--completion-marker` to override the built-in marker. Ralph no longer reads a completion marker from the PRD.
 
 ## Options
 
-```
+```text
 -p, --prd <PATH>                  PRD file path [default: prd.jsonc]
--P, --prompt <PATH>               Custom system prompt file
--c, --completion-marker <TEXT>    Completion marker (overrides built-in default)
--m, --max-iterations <N>          Max iterations, 0=unlimited [default: 10]
+-P, --prompt <PATH>               Custom prompt file
+-m, --max-iterations <N>          Maximum iterations, 0 = unlimited [default: 10]
 -d, --delay <SECONDS>             Delay between iterations [default: 2]
--t, --timeout <SECONDS>           Claude timeout [default: 1800]
---permission-mode <MODE>          default|acceptEdits|plan [default: acceptEdits]
---continue-session                Preserve context between iterations
---skip-init                       Skip initialization phase
---dry-run                         Validate PRD, run verifications, exit without Claude
---webhook <URL>                   Webhook URL for session event notifications
---max-iteration-errors <N>        Auto-block feature after N errors [default: 0] (experimental)
---rate-limit-fallback-seconds <N> Fallback rate-limit cooldown [default: 60]
+-c, --completion-marker <TEXT>    Override the built-in completion marker
+--permission-mode <MODE>          Passed to `claude --permission-mode` [default: acceptEdits]
+--continue-session                Use `claude --continue` instead of `--print`
+--dangerously-skip-permissions    Pass through to Claude to auto-approve actions
+--skip-init                       Skip the initialization phase
+--init                            Create a PRD template and exit
+--init-prompt                     Create `prompt.md` template and exit
+--dry-run                         Validate PRD, run verification commands, exit
+--webhook <URL>                   Send best-effort session lifecycle POSTs
+--max-iteration-errors <N>        Auto-block the current feature after N iteration errors (0 = disabled)
+--rate-limit-fallback-seconds <N> Fallback cooldown when no reset time is parsed [default: 60]
 --rate-limit-buffer-seconds <N>   Safety buffer after parsed reset times [default: 60]
 --rate-limit-post-reset-max-backoff-seconds <N>
-                                  Cap for post-reset backoff [default: 1800]
+                                  Cap post-reset backoff [default: 1800]
 --rate-limit-post-reset-max-retries <N>
                                   Abort after N post-reset retries [default: 4]
---dangerously-skip-permissions    Auto-approve all Claude actions
---init-prompt                     Generate prompt.md template and exit
+--exit-on-rate-limit              Exit immediately instead of waiting and retrying
+-t, --timeout <SECONDS>           Timeout per Claude execution [default: 1800]
 ```
 
 ## Custom Prompts
 
-Ralph uses a built-in system prompt by default. To customize agent behavior, provide your own prompt file.
-
-### Generate template
+Ralph has a built-in prompt. A custom prompt fully replaces it after placeholder substitution.
 
 ```bash
-ralph --init-prompt              # Creates prompt.md
+ralph --init-prompt   # creates prompt.md in the current directory
+ralph --prompt prompt.md
 ```
 
-### Use custom prompt
+If your custom prompt omits rules about PRD edits, verification cadence, progress logging, or completion, Ralph will not add them back.
 
-```bash
-ralph --prompt my-prompt.md      # Use custom prompt
-ralph -P prompt.md               # Short form
-```
-
-### Placeholders
-
-Custom prompts support these placeholders, replaced at runtime:
+Supported placeholders:
 
 | Placeholder | Description |
 |-------------|-------------|
 | `{prd_path}` | Path to the PRD file |
 | `{progress_path}` | Path to the progress file |
-| `{verification_commands}` | Formatted list of verification commands |
+| `{verification_commands}` | Formatted verification command list |
 | `{completion_marker}` | Effective completion marker |
-| `{verification_rule}` | Verification policy sentence based on `runAfterEachFeature` |
-| `{verification_workflow}` | Workflow step for verification timing |
-| `{completion_workflow}` | Workflow step for when to mark a feature complete |
-
-### Example use case
-
-Specialized prompts for different project types:
-
-```bash
-# Rust projects - strict linting, no unsafe
-ralph --prompt prompts/rust-strict.md
-
-# Python projects - pytest focus, type hints
-ralph --prompt prompts/python.md
-
-# Documentation - markdown style, grammar checks
-ralph --prompt prompts/docs.md
-```
+| `{verification_rule}` | Verification policy sentence derived from `runAfterEachFeature` |
+| `{verification_workflow}` | Workflow sentence for verification timing |
+| `{completion_workflow}` | Workflow sentence for when to mark a feature complete |
 
 ## Webhooks
 
-Send HTTP POST notifications to a URL when session events occur:
+Send best-effort HTTP `POST` notifications when a session starts, completes, or fails:
 
 ```bash
 ralph --webhook https://example.com/webhook
 ```
 
-### Events
+Events:
 
 | Event | Trigger |
 |-------|---------|
 | `session_start` | Session begins |
-| `session_complete` | All features completed successfully |
-| `session_failed` | Session exits due to too many failures |
+| `session_complete` | Completion marker detected |
+| `session_failed` | Session exits due to failure conditions |
 
-### Payload
+Payload:
 
 ```json
 {
@@ -207,22 +197,16 @@ ralph --webhook https://example.com/webhook
 | `timestamp` | RFC3339 timestamp |
 | `message` | Human-readable description |
 
-## Safety
+Webhook failures are logged but do not fail the session.
 
-- **Validation** — Only PRD status field changes allowed per iteration
-- **Failure limit** — Exits after 3 consecutive failures
-- **Loop detection** — Detects stuck patterns and reports
-- **Rate limiting** — Parses Claude reset messages, waits until reset plus buffer, and uses post-reset backoff to avoid thrashing
-- **Ctrl+C** — First `Ctrl+C` requests graceful shutdown and Ralph exits with code `130` after cleanup; second `Ctrl+C` forces an immediate exit
+## Operational Notes
 
-## Interrupt Behavior
-
-- The first `Ctrl+C` cancels the current run, waits for the active Claude invocation or sleep to finish cleaning up, then exits with status `130`.
-- On Unix, Ralph starts Claude in a separate process group and interrupts Claude's process group before escalating to a force kill if it does not exit quickly.
-- Processes that deliberately move themselves into a different session or process group are outside that cleanup model.
-- On non-Unix platforms, Ralph falls back to terminating the direct Claude child process.
-- Rate-limit waits, inter-iteration delays, initialization git commands, and `--dry-run` verification commands are cancellation-aware.
-- Short local filesystem work and small synchronous git checks in validation paths are still best-effort rather than fully cancellable.
+- PRD validation is Git-dependent. Ralph validates `prd.jsonc` with `git diff HEAD -- <prd>`; outside a Git repo that validation is skipped.
+- Ralph aborts after 3 consecutive failed iterations.
+- `--max-iteration-errors` can auto-block the current in-progress feature after repeated iteration errors.
+- Rate-limit handling parses reset times, waits with a safety buffer, and uses post-reset backoff unless `--exit-on-rate-limit` is set.
+- First `Ctrl+C` requests graceful shutdown and Ralph exits with code `130` after cleanup. Second `Ctrl+C` forces immediate exit.
+- On Unix, Ralph manages Claude in a separate process group for cleanup. On non-Unix platforms it terminates the direct child process.
 
 ## License
 
