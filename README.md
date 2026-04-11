@@ -38,6 +38,9 @@ ralph --init       # creates prd.jsonc
 $EDITOR prd.jsonc  # edit the generated template
 ralph --dry-run    # validate PRD and run verification commands
 ralph              # start the loop
+
+sandboxing together with --dangerously-skip-permissions is recommended
+to avoid silently getting stuck on permissions
 ```
 
 ## Files
