@@ -11,24 +11,16 @@ pub const PLACEHOLDER_VERIFICATION_RULE: &str = "{verification_rule}";
 pub const PLACEHOLDER_VERIFICATION_WORKFLOW: &str = "{verification_workflow}";
 pub const PLACEHOLDER_COMPLETION_WORKFLOW: &str = "{completion_workflow}";
 
-const PROMPT_TEMPLATE: &str = r#"You are an autonomous coding agent working through features defined in a PRD.
+const PROMPT_TEMPLATE: &str = r#"You are implementing a single feature from {prd_path}.
 
-## Important Paths
+Rules
 
-- **PRD file**: {prd_path}
-- **Progress file**: {progress_path}
+1. Pick a single feature from {prd_path}
+2. You may only change the "status" field in {prd_path}
+3. Avoid removing or weakening existing tests
 
-## Rules
+Run to verify changes:
 
-1. **ONE feature per session** - Focus on a single feature from the PRD
-2. **Status-only edits** - You may ONLY change the "status" field in {prd_path}
-3. **No test removal** - Never remove or weaken existing tests
-4. **Verification cadence** - {verification_rule}
-5. **Commit per feature** - Commit changes with descriptive messages, include only files relevant to the feature
-
-## Verification Commands
-
-Run these commands to verify your changes:
 {verification_commands}
 
 ## Workflow
@@ -39,18 +31,18 @@ Run these commands to verify your changes:
 4. Implement the feature following the defined steps
 5. {verification_workflow}
 6. {completion_workflow}
-7. If blocked (unclear requirements, missing dependencies, repeated failures), update status to "blocked"
-8. Commit your changes with a descriptive message (only feature-related files)
-9. **ALWAYS** append to {progress_path} at the end of each loop, documenting:
-   - Which feature you worked on
-   - What you accomplished
-   - Any blockers or issues encountered
+7. If unable to complete the feature, update status to "blocked"
+8. Commit changes with a descriptive message, include only feature-related files
+9. Append to {progress_path}, documenting:
+   - Which feature was worked on
+   - What was accomplished
+   - Issues encountered
    - Current status
-10. **STOP** - Do not start another feature. The next iteration will handle remaining work.
+10. STOP - Do not start another feature. The next iteration will handle remaining work.
 
 ## Completion
 
-When ALL features have status "complete" or "blocked" and all verifications pass:
+When ALL features have status "complete" or "blocked", and all verifications pass:
 1. Append final summary to {progress_path}
 2. Make a final commit
 3. Output: {completion_marker}
@@ -216,9 +208,9 @@ mod tests {
                 DEFAULT_TEST_MARKER,
             );
 
-            assert!(result.contains("## Important Paths"));
-            assert!(result.contains("**PRD file**"));
-            assert!(result.contains("**Progress file**"));
+            assert!(result.contains("You are implementing a single feature from"));
+            assert!(result.contains(&prd_file.path().display().to_string()));
+            assert!(result.contains("progress.txt"));
         }
 
         #[test]
@@ -234,12 +226,10 @@ mod tests {
                 DEFAULT_TEST_MARKER,
             );
 
-            assert!(result.contains("## Rules"));
-            assert!(result.contains("ONE feature per session"));
-            assert!(result.contains("Status-only edits"));
-            assert!(result.contains("No test removal"));
-            assert!(result.contains("Verification cadence"));
-            assert!(result.contains("Commit per feature"));
+            assert!(result.contains("Rules"));
+            assert!(result.contains("Pick a single feature"));
+            assert!(result.contains("You may only change the \"status\" field"));
+            assert!(result.contains("Avoid removing or weakening existing tests"));
         }
 
         #[test]
@@ -258,8 +248,8 @@ mod tests {
             assert!(result.contains("## Workflow"));
             assert!(result.contains("Find the first feature"));
             assert!(result.contains("verification"));
-            assert!(result.contains("Commit your changes"));
-            assert!(result.contains("**STOP**"));
+            assert!(result.contains("Commit changes with a descriptive message"));
+            assert!(result.contains("STOP - Do not start another feature"));
         }
 
         #[test]
@@ -365,9 +355,7 @@ mod tests {
                 DEFAULT_TEST_MARKER,
             );
 
-            assert!(
-                result.contains("Run all verification commands before marking a feature complete")
-            );
+            assert!(result.contains("Run all verification commands for the feature"));
             assert!(
                 result.contains("If verification passes, update feature status to \"complete\"")
             );
@@ -386,8 +374,9 @@ mod tests {
                 DEFAULT_TEST_MARKER,
             );
 
-            assert!(result.contains("Verification after each feature is optional"));
-            assert!(result.contains("before final completion"));
+            assert!(result.contains(
+                "Verification after each feature is optional. If you defer it, note that clearly in the progress log"
+            ));
             assert!(result
                 .contains("If the feature is complete, update feature status to \"complete\""));
         }
@@ -416,7 +405,7 @@ mod tests {
                 DEFAULT_TEST_MARKER,
             );
 
-            assert!(result.contains("## Verification Commands"));
+            assert!(result.contains("Run to verify changes:"));
         }
 
         #[test]
@@ -492,8 +481,7 @@ mod tests {
                 DEFAULT_TEST_MARKER,
             );
 
-            assert!(result.contains("## Verification Commands"));
-            assert!(result.contains("Run these commands to verify"));
+            assert!(result.contains("Run to verify changes:"));
         }
 
         #[test]
@@ -820,9 +808,9 @@ mod tests {
             )
             .unwrap();
 
-            assert!(result.contains("## Important Paths"));
-            assert!(result.contains("## Rules"));
+            assert!(result.contains("Rules"));
             assert!(result.contains("## Workflow"));
+            assert!(result.contains("## Completion"));
         }
 
         #[test]
@@ -850,7 +838,7 @@ mod tests {
             assert!(result.contains("Custom prompt with"));
             assert!(result.contains(&prd_file.path().display().to_string()));
             assert!(result.contains("DONE"));
-            assert!(!result.contains("## Important Paths"));
+            assert!(!result.contains("## Workflow"));
         }
 
         #[test]
@@ -940,7 +928,7 @@ mod tests {
             generate_prompt_template(&path).unwrap();
 
             let content = std::fs::read_to_string(&path).unwrap();
-            assert!(content.contains("You are an autonomous coding agent"));
+            assert!(content.contains("You are implementing a single feature"));
         }
 
         #[test]
@@ -955,7 +943,6 @@ mod tests {
             assert!(content.contains("{progress_path}"));
             assert!(content.contains("{verification_commands}"));
             assert!(content.contains("{completion_marker}"));
-            assert!(content.contains("{verification_rule}"));
             assert!(content.contains("{verification_workflow}"));
             assert!(content.contains("{completion_workflow}"));
         }
@@ -968,9 +955,8 @@ mod tests {
             generate_prompt_template(&path).unwrap();
 
             let content = std::fs::read_to_string(&path).unwrap();
-            assert!(content.contains("## Important Paths"));
-            assert!(content.contains("## Rules"));
-            assert!(content.contains("## Verification Commands"));
+            assert!(content.contains("Rules"));
+            assert!(content.contains("Run to verify changes:"));
             assert!(content.contains("## Workflow"));
             assert!(content.contains("## Completion"));
         }
@@ -994,7 +980,7 @@ mod tests {
 
             let content = std::fs::read_to_string(&path).unwrap();
             assert!(!content.contains("old content"));
-            assert!(content.contains("You are an autonomous coding agent"));
+            assert!(content.contains("You are implementing a single feature"));
         }
     }
 }
