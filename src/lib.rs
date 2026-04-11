@@ -11,5 +11,6 @@ pub mod prompt;
 pub mod rate_limit;
 pub mod retry;
 pub mod runner;
+mod subprocess;
 pub mod validation;
 pub mod webhook;

@@ -10,18 +10,62 @@ use crate::{
     iteration::{self, IterationContext},
     output, prd,
     rate_limit::{self, RateLimitInfo, RetryDecision, RetryPolicy, RetryReason},
-    retry,
+    retry, subprocess,
     webhook::{self, EventType},
 };
 use anyhow::{bail, Context, Result};
 use chrono::{Local, Utc};
 use tokio::signal;
+use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 use tokio_util::sync::CancellationToken;
 
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+const INTERRUPTED_EXIT_CODE: i32 = 130;
 
-pub async fn run(args: Args) -> Result<()> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunOutcome {
+    Completed,
+    Interrupted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InterruptAction {
+    RequestShutdown,
+    ForceExit,
+}
+
+struct ShutdownMonitor {
+    token: CancellationToken,
+    task: JoinHandle<()>,
+}
+
+impl ShutdownMonitor {
+    fn install() -> Self {
+        let token = CancellationToken::new();
+        let signal_token = token.clone();
+        let task = tokio::spawn(async move {
+            monitor_for_interrupts(signal_token).await;
+        });
+        Self { token, task }
+    }
+
+    fn token(&self) -> &CancellationToken {
+        &self.token
+    }
+}
+
+impl Drop for ShutdownMonitor {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+pub async fn run(args: Args) -> Result<RunOutcome> {
+    let shutdown = ShutdownMonitor::install();
+    let shutdown_token = shutdown.token();
+    let start_time = std::time::Instant::now();
+
     if !args.prd.exists() {
         output::error(&format!("PRD file not found: {}", args.prd.display()));
         output::log("Run 'ralph --init' to create a template, or specify path with -p");
@@ -30,11 +74,6 @@ pub async fn run(args: Args) -> Result<()> {
 
     let prd = prd::Prd::load(&args.prd)?;
     let completion_marker = config::resolve_completion_marker(args.completion_marker.as_deref())?;
-
-    if args.dry_run {
-        return dry_run::run(&args, &prd);
-    }
-
     let project_dir = args
         .prd
         .parent()
@@ -43,6 +82,22 @@ pub async fn run(args: Args) -> Result<()> {
     let progress_path = project_dir.join("progress.txt");
     let ralph_dir = project_dir.join(".ralph");
     let logs_dir = ralph_dir.join("logs");
+
+    if args.dry_run {
+        match dry_run::run(&args, &prd, shutdown_token).await {
+            Ok(true) => {
+                log_interrupted(0, start_time, None);
+                return Ok(RunOutcome::Interrupted);
+            }
+            Ok(false) => return Ok(RunOutcome::Completed),
+            Err(error) if shutdown_token.is_cancelled() => {
+                log_shutdown_cleanup_error("Dry-run shutdown did not finish cleanly", &error);
+                log_interrupted(0, start_time, None);
+                return Ok(RunOutcome::Interrupted);
+            }
+            Err(error) => return Err(error),
+        }
+    }
 
     std::fs::create_dir_all(&logs_dir).context("Failed to create .ralph/logs directory")?;
 
@@ -54,7 +109,27 @@ pub async fn run(args: Args) -> Result<()> {
     }
 
     if !args.skip_init {
-        init::run_init_phase(&prd, &args.prd, &progress_path)?;
+        match init::run_init_phase(&prd, &args.prd, &progress_path, shutdown_token).await {
+            Ok(true) => {
+                log_interrupted(0, start_time, Some(&logs_dir));
+                return Ok(RunOutcome::Interrupted);
+            }
+            Ok(false) => {}
+            Err(error) if shutdown_token.is_cancelled() => {
+                log_shutdown_cleanup_error(
+                    "Initialization shutdown did not finish cleanly",
+                    &error,
+                );
+                log_interrupted(0, start_time, Some(&logs_dir));
+                return Ok(RunOutcome::Interrupted);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    if shutdown_token.is_cancelled() {
+        log_interrupted(0, start_time, Some(&logs_dir));
+        return Ok(RunOutcome::Interrupted);
     }
 
     if let Some(ref url) = args.webhook {
@@ -92,7 +167,6 @@ pub async fn run(args: Args) -> Result<()> {
     }
     println!();
 
-    let start_time = std::time::Instant::now();
     let mut iteration: u32 = 0;
     let mut consecutive_failures: u32 = 0;
     let mut error_tracker = retry::IterationErrorTracker::new(args.max_iteration_errors);
@@ -105,13 +179,13 @@ pub async fn run(args: Args) -> Result<()> {
     };
 
     loop {
+        if shutdown_token.is_cancelled() {
+            log_interrupted(iteration, start_time, Some(&logs_dir));
+            return Ok(RunOutcome::Interrupted);
+        }
+
         let current_iteration = iteration + 1;
-
         let current_prd = prd::Prd::load(&args.prd)?;
-
-        let cancel_token = CancellationToken::new();
-        let cancel_token_clone = cancel_token.clone();
-
         let ctx = IterationContext {
             args: &args,
             prd: &current_prd,
@@ -125,67 +199,95 @@ pub async fn run(args: Args) -> Result<()> {
         let mut skip_normal_delay = false;
         let mut count_iteration = true;
 
-        tokio::select! {
-            _ = signal::ctrl_c() => {
-                cancel_token_clone.cancel();
-                println!();
-                output::warn(&format!("Ralph loop interrupted after {iteration} iterations"));
-                let duration = start_time.elapsed();
-                output::log(&format!("Total runtime: {}", output::format_duration(duration)));
-                return Ok(());
+        match iteration::run(current_iteration, &ctx, shutdown_token).await {
+            Ok(IterationResult::Cancelled) => {
+                log_interrupted(iteration, start_time, Some(&logs_dir));
+                return Ok(RunOutcome::Interrupted);
             }
-            result = iteration::run(current_iteration, &ctx, &cancel_token) => {
-                match result {
-                    Ok(IterationResult::Continue) => {
-                        consecutive_failures = 0;
-                        rate_limit_state.clear();
-                    }
-                    Ok(IterationResult::Complete) => {
-                        rate_limit_state.clear();
-                        println!();
-                        output::separator();
-                        output::success("Completion marker found! Ralph loop finished.");
-                        output::separator();
-                        let duration = start_time.elapsed();
-                        output::log(&format!("Total iterations: {current_iteration}"));
-                        output::log(&format!("Total runtime: {}", output::format_duration(duration)));
-                        output::log(&format!("Logs saved to: {}", logs_dir.display()));
-                        if let Some(ref url) = args.webhook {
-                            webhook::send_webhook(url, EventType::SessionComplete, &format!("Session complete after {current_iteration} iterations"));
-                        }
-                        return Ok(());
-                    }
-                    Ok(IterationResult::RateLimit(info)) => {
-                        count_iteration = false;
-                        skip_normal_delay = true;
-                        handle_rate_limit(
-                            &info,
-                            &mut rate_limit_state,
-                            &rate_limit_policy,
-                            current_iteration,
-                            start_time,
-                            &logs_dir,
-                            args.webhook.as_deref(),
-                        ).await?;
-                    }
-                    Ok(IterationResult::LoopDetected) => {
-                        rate_limit_state.clear();
-                        output::warn("Loop detection: Agent appears blocked");
-                        handle_iteration_error(&mut error_tracker, &args.prd, &current_prd)?;
-                        handle_failure(&mut consecutive_failures, current_iteration, start_time, &logs_dir, args.webhook.as_deref())?;
-                    }
-                    Ok(IterationResult::Failed) => {
-                        rate_limit_state.clear();
-                        handle_iteration_error(&mut error_tracker, &args.prd, &current_prd)?;
-                        handle_failure(&mut consecutive_failures, current_iteration, start_time, &logs_dir, args.webhook.as_deref())?;
-                    }
-                    Err(e) => {
-                        rate_limit_state.clear();
-                        output::error(&format!("Iteration error: {e:#}"));
-                        handle_iteration_error(&mut error_tracker, &args.prd, &current_prd)?;
-                        handle_failure(&mut consecutive_failures, current_iteration, start_time, &logs_dir, args.webhook.as_deref())?;
-                    }
+            Ok(IterationResult::Continue) => {
+                consecutive_failures = 0;
+                rate_limit_state.clear();
+            }
+            Ok(IterationResult::Complete) => {
+                rate_limit_state.clear();
+                println!();
+                output::separator();
+                output::success("Completion marker found! Ralph loop finished.");
+                output::separator();
+                let duration = start_time.elapsed();
+                output::log(&format!("Total iterations: {current_iteration}"));
+                output::log(&format!(
+                    "Total runtime: {}",
+                    output::format_duration(duration)
+                ));
+                output::log(&format!("Logs saved to: {}", logs_dir.display()));
+                if let Some(ref url) = args.webhook {
+                    webhook::send_webhook(
+                        url,
+                        EventType::SessionComplete,
+                        &format!("Session complete after {current_iteration} iterations"),
+                    );
                 }
+                return Ok(RunOutcome::Completed);
+            }
+            Ok(IterationResult::RateLimit(info)) => {
+                count_iteration = false;
+                skip_normal_delay = true;
+                if handle_rate_limit(
+                    &info,
+                    &mut rate_limit_state,
+                    &rate_limit_policy,
+                    current_iteration,
+                    start_time,
+                    &logs_dir,
+                    args.webhook.as_deref(),
+                    shutdown_token,
+                )
+                .await?
+                {
+                    log_interrupted(iteration, start_time, Some(&logs_dir));
+                    return Ok(RunOutcome::Interrupted);
+                }
+            }
+            Ok(IterationResult::LoopDetected) => {
+                rate_limit_state.clear();
+                output::warn("Loop detection: Agent appears blocked");
+                handle_iteration_error(&mut error_tracker, &args.prd, &current_prd)?;
+                handle_failure(
+                    &mut consecutive_failures,
+                    current_iteration,
+                    start_time,
+                    &logs_dir,
+                    args.webhook.as_deref(),
+                )?;
+            }
+            Ok(IterationResult::Failed) => {
+                rate_limit_state.clear();
+                handle_iteration_error(&mut error_tracker, &args.prd, &current_prd)?;
+                handle_failure(
+                    &mut consecutive_failures,
+                    current_iteration,
+                    start_time,
+                    &logs_dir,
+                    args.webhook.as_deref(),
+                )?;
+            }
+            Err(e) => {
+                rate_limit_state.clear();
+                if shutdown_token.is_cancelled() {
+                    log_shutdown_cleanup_error("Interrupt cleanup did not finish cleanly", &e);
+                    log_interrupted(iteration, start_time, Some(&logs_dir));
+                    return Ok(RunOutcome::Interrupted);
+                }
+                output::error(&format!("Iteration error: {e:#}"));
+                handle_iteration_error(&mut error_tracker, &args.prd, &current_prd)?;
+                handle_failure(
+                    &mut consecutive_failures,
+                    current_iteration,
+                    start_time,
+                    &logs_dir,
+                    args.webhook.as_deref(),
+                )?;
             }
         }
 
@@ -193,8 +295,8 @@ pub async fn run(args: Args) -> Result<()> {
             iteration += 1;
         }
 
+        println!();
         if args.max_iterations > 0 && iteration >= args.max_iterations {
-            println!();
             output::warn(&format!("Max iterations ({}) reached", args.max_iterations));
             let duration = start_time.elapsed();
             output::log(&format!(
@@ -202,18 +304,54 @@ pub async fn run(args: Args) -> Result<()> {
                 output::format_duration(duration)
             ));
             output::log(&format!("Logs saved to: {}", logs_dir.display()));
-            return Ok(());
+            return Ok(RunOutcome::Completed);
         }
 
+        println!();
         if skip_normal_delay {
-            println!();
             continue;
         }
 
-        println!();
         output::dim(&format!("Waiting {}s before next iteration...", args.delay));
-        sleep(Duration::from_secs(args.delay)).await;
+        if sleep_with_shutdown(Duration::from_secs(args.delay), shutdown_token).await {
+            log_interrupted(iteration, start_time, Some(&logs_dir));
+            return Ok(RunOutcome::Interrupted);
+        }
         println!();
+    }
+}
+
+async fn monitor_for_interrupts(shutdown_token: CancellationToken) {
+    let mut interrupt_count = 0;
+    while signal::ctrl_c().await.is_ok() {
+        match interrupt_action_for_count(interrupt_count) {
+            InterruptAction::RequestShutdown => {
+                shutdown_token.cancel();
+                println!();
+                output::warn(
+                    "Ctrl+C received. Waiting for cleanup to finish. Press Ctrl+C again to force exit.",
+                );
+            }
+            InterruptAction::ForceExit => {
+                println!();
+                output::error("Second Ctrl+C received. Forcing immediate exit.");
+                if let Err(error) = subprocess::force_terminate_tracked_processes() {
+                    output::warn(&format!(
+                        "Failed to force-kill active subprocesses before exit: {error:#}"
+                    ));
+                }
+                std::process::exit(INTERRUPTED_EXIT_CODE);
+            }
+        }
+        interrupt_count += 1;
+    }
+}
+
+fn interrupt_action_for_count(interrupt_count: usize) -> InterruptAction {
+    if interrupt_count == 0 {
+        InterruptAction::RequestShutdown
+    } else {
+        InterruptAction::ForceExit
     }
 }
 
@@ -286,7 +424,8 @@ async fn handle_rate_limit(
     start_time: std::time::Instant,
     logs_dir: &std::path::Path,
     webhook_url: Option<&str>,
-) -> Result<()> {
+    shutdown_token: &CancellationToken,
+) -> Result<bool> {
     output::error(&format!("Rate limit detected: {}", info.raw_message));
 
     match rate_limit::plan_retry(info, state, policy) {
@@ -312,8 +451,7 @@ async fn handle_rate_limit(
                     wait.post_reset_failures
                 )),
             }
-            sleep(wait.duration).await;
-            Ok(())
+            Ok(sleep_with_shutdown(wait.duration, shutdown_token).await)
         }
         RetryDecision::Abort(abort) => {
             println!();
@@ -360,4 +498,68 @@ fn format_retry_deadline(retry_at: chrono::DateTime<Utc>) -> String {
         .with_timezone(&Local)
         .format("%Y-%m-%d %H:%M:%S %Z")
         .to_string()
+}
+
+async fn sleep_with_shutdown(duration: Duration, shutdown_token: &CancellationToken) -> bool {
+    tokio::select! {
+        _ = shutdown_token.cancelled() => true,
+        _ = sleep(duration) => false,
+    }
+}
+
+fn log_interrupted(
+    iteration: u32,
+    start_time: std::time::Instant,
+    logs_dir: Option<&std::path::Path>,
+) {
+    println!();
+    output::warn(&format!(
+        "Ralph interrupted after {iteration} completed iterations"
+    ));
+    let duration = start_time.elapsed();
+    output::log(&format!(
+        "Total runtime: {}",
+        output::format_duration(duration)
+    ));
+    if let Some(logs_dir) = logs_dir {
+        output::log(&format!("Logs saved to: {}", logs_dir.display()));
+    }
+}
+
+fn log_shutdown_cleanup_error(context: &str, error: &anyhow::Error) {
+    output::warn(&format!("{context}: {error:#}"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interrupt_action_requests_shutdown_first() {
+        assert_eq!(
+            interrupt_action_for_count(0),
+            InterruptAction::RequestShutdown
+        );
+    }
+
+    #[test]
+    fn interrupt_action_forces_exit_after_first_signal() {
+        assert_eq!(interrupt_action_for_count(1), InterruptAction::ForceExit);
+        assert_eq!(interrupt_action_for_count(2), InterruptAction::ForceExit);
+    }
+
+    #[tokio::test]
+    async fn sleep_with_shutdown_returns_true_when_cancelled() {
+        let shutdown_token = CancellationToken::new();
+        shutdown_token.cancel();
+
+        assert!(sleep_with_shutdown(Duration::from_millis(10), &shutdown_token).await);
+    }
+
+    #[tokio::test]
+    async fn sleep_with_shutdown_returns_false_after_waiting() {
+        let shutdown_token = CancellationToken::new();
+
+        assert!(!sleep_with_shutdown(Duration::from_millis(1), &shutdown_token).await);
+    }
 }
