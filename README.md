@@ -56,9 +56,10 @@ These files live next to the PRD. If you use `--prd path/to/custom.jsonc`, Ralph
 2. Create `progress.txt` and `.ralph/logs/` if needed.
 3. Run the optional init phase: git status, PRD summary, progress summary, recent commits.
 4. Invoke `claude` with the built-in prompt or a custom prompt.
-5. Classify the result as `continue`, `complete`, `rate-limit`, `loop-detected`, `failed`, or `cancelled`.
-6. In Git repos, validate that PRD changes only touched `status`.
-7. Stop on completion marker, interruption, max iterations, or repeated failures.
+5. Print the resolved active prompt once at launch so you can inspect the exact instructions being sent.
+6. Classify the result as `continue`, `complete`, `rate-limit`, `loop-detected`, `failed`, or `cancelled`.
+7. In Git repos, validate that PRD changes only touched `status`.
+8. Stop on completion marker, interruption, max iterations, or repeated failures.
 
 Completion is marker-based. By default Ralph finishes when Claude outputs `<promise>COMPLETE</promise>`. Override it with `--completion-marker`.
 

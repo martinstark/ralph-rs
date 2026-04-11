@@ -8,7 +8,7 @@ use crate::{
     config::{self, Args},
     dry_run, init,
     iteration::{self, IterationContext},
-    output, prd,
+    output, prd, prompt,
     rate_limit::{self, RateLimitInfo, RetryDecision, RetryPolicy, RetryReason},
     retry, subprocess,
     webhook::{self, EventType},
@@ -132,6 +132,7 @@ pub async fn run(args: Args) -> Result<RunOutcome> {
         return Ok(RunOutcome::Interrupted);
     }
 
+    let launch_prompt = resolve_launch_prompt(&args, &prd, &progress_path, completion_marker)?;
 
     if let Some(ref url) = args.webhook {
         webhook::send_webhook(
@@ -175,6 +176,7 @@ pub async fn run(args: Args) -> Result<RunOutcome> {
         }
     ));
     println!();
+    print_active_prompt(&launch_prompt);
 
     let mut iteration: u32 = 0;
     let mut consecutive_failures: u32 = 0;
@@ -536,6 +538,28 @@ fn format_retry_deadline(retry_at: chrono::DateTime<Utc>) -> String {
         .to_string()
 }
 
+fn resolve_launch_prompt(
+    args: &Args,
+    prd: &prd::Prd,
+    progress_path: &std::path::Path,
+    completion_marker: &str,
+) -> Result<String> {
+    prompt::get_system_prompt(
+        args.prompt.as_deref(),
+        prd,
+        &args.prd,
+        progress_path,
+        completion_marker,
+    )
+}
+
+fn print_active_prompt(prompt: &str) {
+    output::header("Active Prompt");
+    println!();
+    println!("{prompt}");
+    println!();
+}
+
 async fn sleep_with_shutdown(duration: Duration, shutdown_token: &CancellationToken) -> bool {
     tokio::select! {
         _ = shutdown_token.cancelled() => true,
@@ -569,9 +593,12 @@ fn log_shutdown_cleanup_error(context: &str, error: &anyhow::Error) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prd::{Completion, Feature, Project, Status, Verification, VerifyCommand};
     use crate::rate_limit::{RateLimitSource, RetryPolicy};
     use chrono::Utc;
+    use clap::Parser;
     use std::path::Path;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn interrupt_action_requests_shutdown_first() {
@@ -602,6 +629,85 @@ mod tests {
         assert!(!sleep_with_shutdown(Duration::from_millis(1), &shutdown_token).await);
     }
 
+    fn test_prd() -> prd::Prd {
+        prd::Prd {
+            project: Project {
+                name: "test-project".into(),
+                description: "desc".into(),
+                repository: None,
+            },
+            verification: Verification {
+                commands: vec![VerifyCommand {
+                    name: "test".into(),
+                    command: "cargo test".into(),
+                    description: "Run tests".into(),
+                }],
+                run_after_each_feature: true,
+            },
+            features: vec![Feature {
+                id: "feature-1".into(),
+                category: "functional".into(),
+                description: "desc".into(),
+                steps: vec!["step".into()],
+                status: Status::Pending,
+                notes: None,
+            }],
+            completion: Completion {
+                all_features_complete: true,
+                all_verifications_passing: true,
+            },
+        }
+    }
+
+    #[test]
+    fn resolve_launch_prompt_uses_built_in_prompt() {
+        let prd_file = NamedTempFile::new().unwrap();
+        let args = Args::try_parse_from([
+            "ralph",
+            "--prd",
+            prd_file.path().to_str().unwrap(),
+        ])
+        .unwrap();
+
+        let prompt = resolve_launch_prompt(
+            &args,
+            &test_prd(),
+            Path::new("progress.txt"),
+            "<promise>COMPLETE</promise>",
+        )
+        .unwrap();
+
+        assert!(prompt.contains("progress.txt"));
+        assert!(prompt.contains("<promise>COMPLETE</promise>"));
+        assert!(prompt.contains("cargo test"));
+    }
+
+    #[test]
+    fn resolve_launch_prompt_uses_custom_prompt() {
+        let prd_file = NamedTempFile::new().unwrap();
+        let prompt_file = NamedTempFile::new().unwrap();
+        std::fs::write(
+            prompt_file.path(),
+            "Prompt preview for {prd_path} -> {completion_marker}",
+        )
+        .unwrap();
+
+        let args = Args::try_parse_from([
+            "ralph",
+            "--prd",
+            prd_file.path().to_str().unwrap(),
+            "--prompt",
+            prompt_file.path().to_str().unwrap(),
+        ])
+        .unwrap();
+
+        let prompt = resolve_launch_prompt(&args, &test_prd(), Path::new("progress.txt"), "DONE")
+            .unwrap();
+
+        assert!(prompt.contains("Prompt preview for"));
+        assert!(prompt.contains(prd_file.path().to_str().unwrap()));
+        assert!(prompt.contains("DONE"));
+    }
 
     #[tokio::test]
     async fn handle_rate_limit_aborts_when_exit_on_rate_limit_enabled() {
