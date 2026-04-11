@@ -104,6 +104,10 @@ pub struct Args {
     #[arg(long, default_value_t = DEFAULT_POST_RESET_MAX_RETRIES)]
     pub rate_limit_post_reset_max_retries: u32,
 
+    /// Exit immediately on rate limit instead of waiting and retrying
+    #[arg(long)]
+    pub exit_on_rate_limit: bool,
+
     /// Timeout per Claude execution in seconds
     #[arg(short = 't', long, default_value_t = 1800)]
     pub timeout: u64,
@@ -238,6 +242,12 @@ mod tests {
                 args.rate_limit_post_reset_max_retries,
                 DEFAULT_POST_RESET_MAX_RETRIES
             );
+        }
+
+        #[test]
+        fn exit_on_rate_limit_defaults_to_false() {
+            let args = parse_args(&[]);
+            assert!(!args.exit_on_rate_limit);
         }
     }
 
@@ -411,6 +421,12 @@ mod tests {
         fn rate_limit_post_reset_max_retries_override() {
             let args = parse_args(&["--rate-limit-post-reset-max-retries", "6"]);
             assert_eq!(args.rate_limit_post_reset_max_retries, 6);
+        }
+
+        #[test]
+        fn exit_on_rate_limit_flag() {
+            let args = parse_args(&["--exit-on-rate-limit"]);
+            assert!(args.exit_on_rate_limit);
         }
     }
 

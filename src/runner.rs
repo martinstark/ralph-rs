@@ -132,6 +132,7 @@ pub async fn run(args: Args) -> Result<RunOutcome> {
         return Ok(RunOutcome::Interrupted);
     }
 
+
     if let Some(ref url) = args.webhook {
         webhook::send_webhook(
             url,
@@ -165,6 +166,14 @@ pub async fn run(args: Args) -> Result<RunOutcome> {
             args.max_iteration_errors
         ));
     }
+    output::log(&format!(
+        "Rate-limit handling: {}",
+        if args.exit_on_rate_limit {
+            "exit immediately"
+        } else {
+            "retry with backoff"
+        }
+    ));
     println!();
 
     let mut iteration: u32 = 0;
@@ -237,6 +246,7 @@ pub async fn run(args: Args) -> Result<RunOutcome> {
                     &info,
                     &mut rate_limit_state,
                     &rate_limit_policy,
+                    args.exit_on_rate_limit,
                     current_iteration,
                     start_time,
                     &logs_dir,
@@ -420,6 +430,7 @@ async fn handle_rate_limit(
     info: &RateLimitInfo,
     state: &mut rate_limit::RateLimitState,
     policy: &RetryPolicy,
+    exit_on_rate_limit: bool,
     iteration: u32,
     start_time: std::time::Instant,
     logs_dir: &std::path::Path,
@@ -427,6 +438,31 @@ async fn handle_rate_limit(
     shutdown_token: &CancellationToken,
 ) -> Result<bool> {
     output::error(&format!("Rate limit detected: {}", info.raw_message));
+
+    if exit_on_rate_limit {
+        println!();
+        output::separator();
+        output::error("Rate limit retries are disabled for this run.");
+        output::error(&format!("Last rate-limit message: {}", info.raw_message));
+        output::separator();
+        let duration = start_time.elapsed();
+        output::log(&format!("Total iterations: {iteration}"));
+        output::log(&format!(
+            "Total runtime: {}",
+            output::format_duration(duration)
+        ));
+        output::log(&format!("Logs saved to: {}", logs_dir.display()));
+        if let Some(url) = webhook_url {
+            webhook::send_webhook(
+                url,
+                EventType::SessionFailed,
+                &format!(
+                    "Session failed after {iteration} iterations: rate limit detected and retries disabled"
+                ),
+            );
+        }
+        bail!("Rate limit detected and retries disabled");
+    }
 
     match rate_limit::plan_retry(info, state, policy) {
         RetryDecision::Wait(wait) => {
@@ -533,6 +569,9 @@ fn log_shutdown_cleanup_error(context: &str, error: &anyhow::Error) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rate_limit::{RateLimitSource, RetryPolicy};
+    use chrono::Utc;
+    use std::path::Path;
 
     #[test]
     fn interrupt_action_requests_shutdown_first() {
@@ -561,5 +600,69 @@ mod tests {
         let shutdown_token = CancellationToken::new();
 
         assert!(!sleep_with_shutdown(Duration::from_millis(1), &shutdown_token).await);
+    }
+
+
+    #[tokio::test]
+    async fn handle_rate_limit_aborts_when_exit_on_rate_limit_enabled() {
+        let shutdown_token = CancellationToken::new();
+        let info = RateLimitInfo {
+            reset_at: None,
+            observed_at: Utc::now(),
+            raw_message: "Too many requests".to_string(),
+            source: RateLimitSource::Generic,
+        };
+        let mut state = rate_limit::RateLimitState::default();
+
+        let error = handle_rate_limit(
+            &info,
+            &mut state,
+            &RetryPolicy::default(),
+            true,
+            1,
+            std::time::Instant::now(),
+            Path::new("."),
+            None,
+            &shutdown_token,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Rate limit detected and retries disabled"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_rate_limit_waits_when_retry_enabled() {
+        let shutdown_token = CancellationToken::new();
+        let info = RateLimitInfo {
+            reset_at: None,
+            observed_at: Utc::now(),
+            raw_message: "Too many requests".to_string(),
+            source: RateLimitSource::Generic,
+        };
+        let mut state = rate_limit::RateLimitState::default();
+        let policy = RetryPolicy {
+            fallback_seconds: 0,
+            ..RetryPolicy::default()
+        };
+
+        let interrupted = handle_rate_limit(
+            &info,
+            &mut state,
+            &policy,
+            false,
+            1,
+            std::time::Instant::now(),
+            Path::new("."),
+            None,
+            &shutdown_token,
+        )
+        .await
+        .unwrap();
+
+        assert!(!interrupted);
     }
 }
