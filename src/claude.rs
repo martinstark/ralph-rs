@@ -168,6 +168,9 @@ async fn run_claude_inner(
         .shutdown()
         .await
         .context("Failed to close Claude stdin")?;
+    // Child::wait() only auto-closes stdin if the handle is still owned by Child.
+    // We took it above, so drop our handle explicitly to deliver EOF to Claude.
+    drop(stdin);
 
     let stdout = child
         .stdout
@@ -547,6 +550,41 @@ mod tests {
             wait_for_file(&child_pid_path).await;
             wait_for_process_exit(read_pid(&parent_pid_path)).await;
             wait_for_process_exit(read_pid(&child_pid_path)).await;
+        }
+
+        #[tokio::test]
+        async fn run_claude_command_drops_taken_stdin_to_deliver_eof() {
+            let _guard = crate::subprocess::test_process_lock().lock().unwrap();
+            let temp_dir = TempDir::new().unwrap();
+            let stdin_path = temp_dir.path().join("stdin.txt");
+            let script = write_script(
+                &temp_dir,
+                &format!(
+                    "echo pre-stdin\n\
+                     cat > {stdin}\n\
+                     echo post-stdin\n\
+                     echo '<promise>COMPLETE</promise>'",
+                    stdin = stdin_path.display(),
+                ),
+            );
+            let log_path = temp_dir.path().join("claude.log");
+            let args = claude_args(temp_dir.path(), 5);
+            let result = run_claude_command(
+                &script,
+                "prompt",
+                &args,
+                &log_path,
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(result.outcome, ClaudeOutcome::Success);
+            assert!(result.output.contains("pre-stdin"));
+            assert!(result.output.contains("post-stdin"));
+            assert!(result.output.contains("<promise>COMPLETE</promise>"));
+            assert_eq!(fs::read_to_string(&stdin_path).unwrap(), "prompt");
+            assert!(fs::read_to_string(&log_path).unwrap().contains("post-stdin"));
         }
     }
 }
