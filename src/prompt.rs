@@ -11,34 +11,32 @@ pub const PLACEHOLDER_VERIFICATION_RULE: &str = "{verification_rule}";
 pub const PLACEHOLDER_VERIFICATION_WORKFLOW: &str = "{verification_workflow}";
 pub const PLACEHOLDER_COMPLETION_WORKFLOW: &str = "{completion_workflow}";
 
-const PROMPT_TEMPLATE: &str = r#"You are implementing a single feature from {prd_path}.
-
-Rules
-
-1. Pick a single feature from {prd_path}
-2. You may only change the "status" field in {prd_path}
-3. Avoid removing or weakening existing tests
+const PROMPT_TEMPLATE: &str = r#"
+Pick a single feature from {prd_path}.
+You may only change the "status" field in {prd_path}.
+Avoid removing or weakening existing tests.
 
 Run to verify changes:
 
 {verification_commands}
 
-## Workflow
+Workflow:
 
 1. Read {prd_path} and {progress_path} for context
 2. Find the first feature with status "pending" or "in-progress"
 3. If "pending", update status to "in-progress"
-4. Implement the feature following the defined steps
-5. {verification_workflow}
-6. {completion_workflow}
-7. If unable to complete the feature, update status to "blocked"
-8. Commit changes with a descriptive message, include only feature-related files
-9. Append to {progress_path}, documenting:
+4. If status was "in-progress", carefully evaluate the current state of progress before continuing the implementation
+5. Implement the feature following the defined steps
+6. {verification_workflow}
+7. {completion_workflow}
+8. If unable to complete the feature, update status to "blocked"
+9. Commit changes with a descriptive message, include only feature-related files
+10. Append to {progress_path}, documenting:
    - Which feature was worked on
    - What was accomplished
    - Issues encountered
    - Current status
-10. STOP - Do not start another feature. The next iteration will handle remaining work.
+11. When done you must STOP. Do not start another feature.
 
 ## Completion
 
